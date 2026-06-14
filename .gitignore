@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+chroma_db/
+
+# RAG 소스 파일
+*.xlsx
+*.pdf
+*.egg-info/
+dist/
+.pytest_cache/
