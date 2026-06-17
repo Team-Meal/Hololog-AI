@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import chromadb
 from rank_bm25 import BM25Okapi
 
@@ -10,6 +12,7 @@ from app.core.config import get_embedder, settings
 _chroma: chromadb.ClientAPI | None = None
 _bm25: BM25Okapi | None = None
 _bm25_ids: list[str] = []
+_bm25_lock = threading.Lock()
 
 
 def _chroma_client() -> chromadb.ClientAPI:
@@ -28,10 +31,12 @@ def _tok(text: str) -> list[str]:
 def _get_bm25() -> tuple[BM25Okapi, list[str]]:
     global _bm25, _bm25_ids
     if _bm25 is None:
-        result = _chroma_client().get_collection("food_db").get(include=["documents"])
-        docs: list[str] = result["documents"]
-        _bm25_ids = result["ids"]
-        _bm25 = BM25Okapi([_tok(d) for d in docs])
+        with _bm25_lock:
+            if _bm25 is None:
+                result = _chroma_client().get_collection("food_db").get(include=["documents"])
+                docs: list[str] = result["documents"]
+                _bm25_ids = result["ids"]
+                _bm25 = BM25Okapi([_tok(d) for d in docs])
     return _bm25, _bm25_ids
 
 
@@ -93,11 +98,17 @@ def search_food(query: str, n_results: int = 5) -> str:
 
     top_ids = sorted(rrf, key=rrf.__getitem__, reverse=True)[:n_results]
 
-    # 최종 데이터 조회
+    # 최종 데이터 조회 — id 매핑 후 RRF 순서대로 재구성
     final = collection.get(ids=top_ids, include=["documents", "metadatas"])
+    id_map: dict[str, tuple[str, dict]] = {
+        id_: (doc, meta)
+        for id_, doc, meta in zip(final["ids"], final["documents"], final["metadatas"])
+    }
     parts = []
-    for name, meta in zip(final["documents"], final["metadatas"]):
-        meta_str = ", ".join(f"{k}: {v}" for k, v in meta.items())
-        parts.append(f"{name} — {meta_str}")
+    for id_ in top_ids:
+        if id_ not in id_map:
+            continue
+        name, meta = id_map[id_]
+        parts.append(f"{name} — {', '.join(f'{k}: {v}' for k, v in meta.items())}")
 
     return "\n\n".join(parts)

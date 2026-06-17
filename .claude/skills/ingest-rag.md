@@ -6,8 +6,8 @@ RAG 소스 파일을 처리하여 ChromaDB 3개 컬렉션에 저장합니다.
 
 | 파일 | 컬렉션명 | 청킹 전략 |
 |------|---------|----------|
-| `2026학년도학교급식기본계획.pdf` | `policy` | chunk_size=500, overlap=50 |
-| `학교급식_식단작성_참고자료.pdf` | `guidelines` | chunk_size=500, overlap=50 |
+| `2026학년도학교급식기본계획.pdf` | `policy` | SemanticChunker (percentile 10) |
+| `학교급식_식단작성_참고자료.pdf` | `guidelines` | SemanticChunker (percentile 10) |
 | `20251229_음식DB 19495건.xlsx` | `food_db` | 행 단위, 배치 100 |
 
 임베딩 모델: `BAAI/bge-m3` (HuggingFace 로컬)
@@ -16,7 +16,7 @@ RAG 소스 파일을 처리하여 ChromaDB 3개 컬렉션에 저장합니다.
 ## 실행 명령
 
 ```bash
-uv run python app/rag/ingest.py
+uv run python -m app.rag.ingest
 ```
 
 ## 완료 후 확인

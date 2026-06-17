@@ -19,6 +19,12 @@ def _should_regenerate(state: AgentState) -> str:
     return "check_budget"
 
 
+def _after_generate(state: AgentState) -> str:
+    if state.get("error"):
+        return END
+    return "validate_nutrition"
+
+
 def build_graph() -> StateGraph:
     g = StateGraph(AgentState)
 
@@ -29,10 +35,16 @@ def build_graph() -> StateGraph:
     g.add_node("check_budget", check_budget)
     g.add_node("save_plan", save_plan)
 
+    # fetch_ingredients와 retrieve_context 병렬 실행 후 generate_plan에서 합류
     g.add_edge(START, "fetch_ingredients")
-    g.add_edge("fetch_ingredients", "retrieve_context")
+    g.add_edge(START, "retrieve_context")
+    g.add_edge("fetch_ingredients", "generate_plan")
     g.add_edge("retrieve_context", "generate_plan")
-    g.add_edge("generate_plan", "validate_nutrition")
+    g.add_conditional_edges(
+        "generate_plan",
+        _after_generate,
+        {"validate_nutrition": "validate_nutrition", END: END},
+    )
     g.add_conditional_edges(
         "validate_nutrition",
         _should_regenerate,

@@ -1,4 +1,5 @@
 import os
+import threading
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -34,7 +35,7 @@ class Settings(BaseModel):
 
     # RAG 소스 파일
     policy_pdf_path: str = "./data/2026학년도학교급식기본계획.pdf"
-    guidelines_pdf_path: str = "./data/학교급식_식단작성_참고자료 (1).pdf"
+    guidelines_pdf_path: str = "./data/학교급식_식단작성_참고자료.pdf"
     food_db_excel_path: str = "./data/20251229_음식DB 19495건.xlsx"
 
 
@@ -51,12 +52,15 @@ if _llm_api_key and settings.llm_provider in _PROVIDER_KEY_MAP:
     os.environ.setdefault(_PROVIDER_KEY_MAP[settings.llm_provider], _llm_api_key)
 
 _embedder: Embeddings | None = None
+_embedder_lock = threading.Lock()
 
 
 def get_embedder() -> Embeddings:
     global _embedder
     if _embedder is None:
-        _embedder = init_embeddings(
-            f"{settings.embedding_provider}:{settings.embedding_model}",
-        )
+        with _embedder_lock:
+            if _embedder is None:
+                _embedder = init_embeddings(
+                    f"{settings.embedding_provider}:{settings.embedding_model}",
+                )
     return _embedder

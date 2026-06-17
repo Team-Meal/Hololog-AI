@@ -9,7 +9,7 @@ import time
 import chromadb
 import fitz  # PyMuPDF
 import pandas as pd
-from langchain_experimental.text_splitter import SemanticChunker
+from langchain_experimental.text_splitter import SemanticChunker  # noqa: E402
 
 from app.core.config import get_embedder, settings
 
@@ -44,26 +44,32 @@ def ingest_pdf(
     collection_name: str,
     chroma: chromadb.ClientAPI,
 ) -> int:
-    doc = fitz.open(pdf_path)
-    full_text = "".join(page.get_text() for page in doc)
+    print(f"[{collection_name}] 텍스트 추출 중...", flush=True)
+    with fitz.open(pdf_path) as doc:
+        full_text = "".join(page.get_text() for page in doc)
 
+    print(f"[{collection_name}] 의미 단위 분할 중... (잠시 걸립니다)", flush=True)
     splitter = SemanticChunker(
         embeddings=get_embedder(),
         breakpoint_threshold_type="percentile",
         breakpoint_threshold_amount=10,
     )
     chunks = splitter.split_text(full_text)
+    total = len(chunks)
+    print(f"[{collection_name}] {total} chunks 생성", flush=True)
 
     collection = _reset_collection(chroma, collection_name)
 
     batch_size = 50
-    for i in range(0, len(chunks), batch_size):
+    for i in range(0, total, batch_size):
         batch = chunks[i : i + batch_size]
         embeddings = _embed_with_retry(batch)
         ids = [f"{collection_name}_{i + j}" for j in range(len(batch))]
         collection.add(ids=ids, embeddings=embeddings, documents=batch)
+        done = min(i + batch_size, total)
+        print(f"[{collection_name}] 임베딩: {done}/{total} chunks", flush=True)
 
-    return len(chunks)
+    return total
 
 
 _FOOD_DB_COLS = [
@@ -81,6 +87,7 @@ def ingest_excel(
     collection_name: str,
     chroma: chromadb.ClientAPI,
 ) -> int:
+    print(f"[{collection_name}] Excel 읽는 중...", flush=True)
     df = pd.read_excel(excel_path)
     df = df[[c for c in _FOOD_DB_COLS if c in df.columns]]
 
@@ -88,21 +95,24 @@ def ingest_excel(
     meta_cols = [c for c in df.columns if c != "식품명"]
     metadatas = [
         {k: str(v) for k, v in row.items() if pd.notna(v)}
-        for _, row in df[meta_cols].iterrows()
+        for row in df[meta_cols].to_dict("records")
     ]
 
     collection = _reset_collection(chroma, collection_name)
 
     batch_size = 100
     total = len(names)
+    print(f"[{collection_name}] {total}건 임베딩 시작", flush=True)
     for i in range(0, total, batch_size):
         batch_names = names[i : i + batch_size]
         batch_meta = metadatas[i : i + batch_size]
         embeddings = _embed_with_retry(batch_names)
         ids = [f"{collection_name}_{i + j}" for j in range(len(batch_names))]
         collection.add(ids=ids, embeddings=embeddings, documents=batch_names, metadatas=batch_meta)
-        print(f"  [{collection_name}] {min(i + batch_size, total)}/{total}", end="\r")
+        done = min(i + batch_size, total)
+        print(f"[{collection_name}] 임베딩: {done:>6}/{total}", end="\r", flush=True)
 
+    print(f"[{collection_name}] 임베딩: {total:>6}/{total} — 완료", flush=True)
     return total
 
 
@@ -110,16 +120,17 @@ def run() -> None:
     chroma = chromadb.PersistentClient(path=settings.chroma_db_path)
     t0 = time.time()
 
-    count = ingest_pdf(settings.policy_pdf_path, "policy", chroma)
-    print(f"[policy]     {count:>6} chunks")
+    print("=== RAG 인덱싱 시작 ===\n")
 
-    count = ingest_pdf(settings.guidelines_pdf_path, "guidelines", chroma)
-    print(f"[guidelines] {count:>6} chunks")
+    ingest_pdf(settings.policy_pdf_path, "policy", chroma)
+    print()
 
-    count = ingest_excel(settings.food_db_excel_path, "food_db", chroma)
-    print(f"[food_db]    {count:>6} rows")
+    ingest_pdf(settings.guidelines_pdf_path, "guidelines", chroma)
+    print()
 
-    print(f"완료 ({time.time() - t0:.1f}s)")
+    ingest_excel(settings.food_db_excel_path, "food_db", chroma)
+
+    print(f"\n=== 완료 ({time.time() - t0:.1f}s) ===")
 
 
 if __name__ == "__main__":

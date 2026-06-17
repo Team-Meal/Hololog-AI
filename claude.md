@@ -77,3 +77,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 - ROOT_AGENT.md는 전체를 통괄하고
 - 그 아래 폴더마다 폴더명_agent.md를 구성하여 코드를 짜게 한다.
+
+## 외부 라이브러리 문서 조회
+
+라이브러리/프레임워크 API 사용법·버전 변화·공식 패턴이 필요할 때는
+WebSearch보다 context7 MCP를 먼저 사용한다 (resolve-library-id → query-docs).
+내부 리팩토링·비즈니스 로직 디버깅에는 사용하지 않는다.

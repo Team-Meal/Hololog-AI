@@ -83,23 +83,23 @@ Hololog-AI/
 
 ```
 2026학년도학교급식기본계획.pdf  →  PyMuPDF 텍스트 추출
-                                 →  RecursiveCharacterTextSplitter (500자/50 overlap)
+                                 →  SemanticChunker (langchain_experimental, 의미 기반 청킹)
                                  →  BAAI/bge-m3 (HuggingFace 로컬 임베딩)
                                  →  ChromaDB "policy" 컬렉션
 
 학교급식_식단작성_참고자료.pdf   →  (동일 과정)
                                  →  ChromaDB "guidelines" 컬렉션
 
-20251229_음식DB 19495건.xlsx    →  pandas 행 단위 읽기
-                                 →  각 행을 "식품명: X, 에너지: Ykcal, ..." 자연어로 변환
+20251229_음식DB 19495건.xlsx    →  pandas 읽기 (to_dict)
+                                 →  식품명 = document, 영양성분 = metadata
                                  →  BAAI/bge-m3 (HuggingFace 로컬 임베딩)
                                  →  ChromaDB "food_db" 컬렉션 (19,495개 문서)
 ```
 
 ### `app/rag/retriever.py` — ChromaDB 검색
-- `search(컬렉션명, 쿼리, n_results)` — 유사 문서 리스트 반환
-- `search_joined(...)` — 검색 결과를 하나의 문자열로 합쳐서 반환
-- ChromaDB 클라이언트와 임베딩 모델을 모듈 수준 싱글톤으로 관리
+- `search_joined(컬렉션명, 쿼리, n_results)` — policy/guidelines 컬렉션 벡터 검색, 결과를 하나의 문자열로 반환
+- `search_food(쿼리, n_results)` — food_db 하이브리드 검색 (BM25 + 벡터, RRF k=60 병합), RRF 랭킹 순서 보존
+- ChromaDB 클라이언트, 임베딩 모델, BM25 인덱스를 모듈 수준 싱글톤으로 관리 (`threading.Lock` 이중 확인으로 스레드 안전)
 
 ### `app/agent/state.py` — LangGraph 상태
 LangGraph가 노드 간 데이터를 전달할 때 사용하는 공유 상태 객체.
@@ -127,12 +127,16 @@ AgentState = {
 | `fetch_ingredients` | `GET /ingredients` → `state.ingredients` |
 | `retrieve_context` | RAG: policy + guidelines 검색 → `state.guidelines_context` |
 | `generate_plan` | claude-sonnet-4-6 + 구조화 출력(Pydantic) → `state.meal_plan` |
-| `validate_nutrition` | RAG: food_db 검색 + LLM 판단 → `state.validation_errors` (**asyncio.gather 병렬**) |
+| `validate_nutrition` | RAG: food_db 하이브리드 검색 + LLM `NutritionVerdict` 구조화 판단 → `state.validation_errors` (Semaphore(5) 병렬) |
 | `check_budget` | `GET /budgets` → `state.budget_info` |
 | `save_plan` | `POST /diets` + `POST /meals` × 식단 수 |
 
 ### `app/agent/graph.py` — LangGraph 워크플로우
 노드들을 엣지로 연결하고 조건부 분기를 정의한다.
+
+- `fetch_ingredients`와 `retrieve_context`는 START에서 **동시 fan-out** 후 `generate_plan`에서 합류
+- `_after_generate`: `fetch_ingredients` 오류 시 `generate_plan` 이후 즉시 END로 라우팅
+- `_should_regenerate`: 영양 검증 실패 시 최대 3회까지 `generate_plan`으로 루프
 
 ---
 
@@ -157,16 +161,17 @@ AgentState = {
 ┌─────────────────────────────────────────────────────┐
 │  LangGraph 워크플로우 (app/agent/graph.py)           │
 │                                                     │
-│  [1] fetch_ingredients                              │
-│       └─ GET {BACKEND_URL}/ingredients              │
-│       └─ state.ingredients 업데이트                  │
-│                     │                               │
-│  [2] retrieve_context                               │
-│       └─ ChromaDB "policy" 검색                     │
-│       └─ ChromaDB "guidelines" 검색                 │
-│       └─ state.guidelines_context 업데이트           │
-│                     │                               │
-│  [3] generate_plan                                  │
+│  ┌─ [1] fetch_ingredients ──────────────────────┐   │
+│  │   └─ GET {BACKEND_URL}/ingredients           │   │
+│  │   └─ state.ingredients 업데이트               │   │
+│  │                                (병렬 실행)    │   │
+│  └─ [2] retrieve_context ─────────────────────┐ │   │
+│      └─ ChromaDB "policy" 검색                │ │   │
+│      └─ ChromaDB "guidelines" 검색            │ │   │
+│      └─ state.guidelines_context 업데이트     ┘ ┘   │
+│                     │ (합류)                         │
+│  [3] generate_plan  ┘                               │
+│       (오류 있으면 → END)                            │
 │       └─ 시스템 프롬프트: 영양사 전문가 역할           │
 │       └─ 사용자 프롬프트:                            │
 │           - 급식 일자 (해당 월 주중 날짜 목록)         │
@@ -243,7 +248,7 @@ cp .env.example .env
 # .env 파일에 LLM_API_KEY, LANGCHAIN_API_KEY 입력
 
 # 2. RAG 인덱싱 (최초 1회)
-uv run python app/rag/ingest.py
+uv run python -m app.rag.ingest
 
 # 3. 개발 서버 실행
 uv run uvicorn app.main:app --reload --port 8000
@@ -262,9 +267,11 @@ uv run uvicorn app.main:app --reload --port 8000
 | `langgraph` | 1.2 | 에이전트 워크플로우 상태 머신 |
 | `langchain` | 1.3 | LLM/임베딩 추상화 (`init_chat_model`) |
 | `langchain-anthropic` | - | claude-sonnet-4-6 호출, 구조화 출력 |
+| `langchain-experimental` | 0.4 | SemanticChunker (의미 기반 PDF 청킹) |
 | `langchain-huggingface` | 1.2 | BAAI/bge-m3 로컬 임베딩 |
 | `langsmith` | 0.8 | LLM 호출 추적/모니터링 |
 | `chromadb` | 1.5 | 로컬 벡터 데이터베이스 |
+| `rank-bm25` | 0.2 | food_db BM25 하이브리드 검색 |
 | `pymupdf` | 1.27 | PDF 텍스트 추출 |
 | `pandas` | 3.0 | Excel 음식DB 처리 |
 | `httpx` | 0.28 | 백엔드 API 비동기 HTTP 클라이언트 |
