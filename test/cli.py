@@ -23,7 +23,7 @@ def main() -> None:
     month = ask("대상 월 (YYYY-MM)", "2026-07")
     school_id = ask("학교 ID", "1")
     token = ask("인증 토큰 (없으면 Enter)", "test")
-    holidays_raw = ask("공휴일·휴무일 (쉼표 구분 YYYY-MM-DD, 없으면 Enter)", "")
+    holidays_raw = ask("추가 휴무일 (공휴일 자동제외, 학교 재량휴업일만 입력. 쉼표 구분 YYYY-MM-DD)", "")
     holidays = [h.strip() for h in holidays_raw.split(",") if h.strip()]
 
     print(f"\n요청 중... (POST {BASE_URL}/agent/generate-plan)\n")

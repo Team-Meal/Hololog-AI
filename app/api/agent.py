@@ -2,6 +2,7 @@ import calendar
 import re
 from datetime import date as _date
 
+import holidays as _holidays_lib
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, field_validator
 
@@ -11,11 +12,14 @@ from app.agent.state import AgentState
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 
-def _school_days(month: str, holidays: list[str]) -> list[str]:
-    """주말·공휴일을 제외한 급식 제공 날짜 목록."""
+def _school_days(month: str, extra_holidays: list[str]) -> list[str]:
+    """주말·한국 공휴일·추가 휴무일을 제외한 급식 제공 날짜 목록."""
     year, m = map(int, month.split("-"))
     _, last_day = calendar.monthrange(year, m)
-    holiday_set = set(holidays)
+
+    kr_holidays = _holidays_lib.country_holidays("KR", years=year)
+    holiday_set = {d.isoformat() for d in kr_holidays} | set(extra_holidays)
+
     return [
         _date(year, m, d).isoformat()
         for d in range(1, last_day + 1)
@@ -27,7 +31,7 @@ def _school_days(month: str, holidays: list[str]) -> list[str]:
 class GeneratePlanRequest(BaseModel):
     month: str          # YYYY-MM
     school_id: int
-    holidays: list[str] = []    # 공휴일·학교 휴무일 (YYYY-MM-DD)
+    holidays: list[str] = []    # 학교 재량휴업일 등 추가 휴무일 (YYYY-MM-DD)
 
     @field_validator("month")
     @classmethod
