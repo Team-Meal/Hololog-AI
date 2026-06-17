@@ -1,5 +1,7 @@
+import re
+
 from fastapi import APIRouter, Header, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.agent.graph import meal_plan_graph
 from app.agent.state import AgentState
@@ -10,6 +12,13 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 class GeneratePlanRequest(BaseModel):
     month: str      # YYYY-MM
     school_id: int
+
+    @field_validator("month")
+    @classmethod
+    def validate_month(cls, v: str) -> str:
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", v):
+            raise ValueError("month must be YYYY-MM format (e.g. 2026-07)")
+        return v
 
 
 class GeneratePlanResponse(BaseModel):

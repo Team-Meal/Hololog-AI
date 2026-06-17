@@ -10,7 +10,7 @@
 2. **환경변수 확인** (`.env` 파일 또는 시스템 환경변수)
    - `LANGCHAIN_API_KEY` — LangSmith 추적용
    - `LANGCHAIN_PROJECT` — LangSmith 프로젝트명 (예: `hololog-ai-dev`)
-   - `OPENAI_API_KEY` — LLM 및 임베딩 (`text-embedding-3-small`)
+   - `LLM_API_KEY` — LLM API 키 (llm_provider에 맞는 키)
    - `REDIS_URL` — Redis 연결 (기본: `redis://localhost:6379`)
 
 3. **의존성 설치 여부**

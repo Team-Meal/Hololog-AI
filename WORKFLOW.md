@@ -54,13 +54,23 @@ Hololog-AI/
 ## 3. 핵심 컴포넌트 설명
 
 ### `app/core/config.py` — 설정 허브
-- `pydantic-settings`로 `.env` 파일을 자동 로드
-- OpenAI API 키, LangSmith 키, 백엔드 URL, ChromaDB 경로 등을 관리
-- 모듈 import 시 `settings.apply_langsmith_env()`가 자동 실행되어 LangSmith 추적 활성화
+- `load_dotenv()`로 `.env`를 로드, LangSmith 환경변수를 `os.environ`에 직접 세팅
+- LLM/임베딩 모델은 `Settings` 클래스에서 직접 수정 (env 변경 불필요)
+- `LLM_API_KEY` 하나로 provider 전환 지원 — `_PROVIDER_KEY_MAP`이 provider별 env 변수로 자동 매핑
+  - `google_genai` → `GOOGLE_API_KEY`
+  - `openai` → `OPENAI_API_KEY`
+  - `anthropic` → `ANTHROPIC_API_KEY`
 
 ```
-.env 파일 → Settings 객체 → 전역 settings 인스턴스 (lru_cache)
+.env (LLM_API_KEY, LANGCHAIN_API_KEY)
+  → load_dotenv()
+  → Settings 객체 (lru_cache)
+  → LLM_API_KEY를 llm_provider에 맞는 env 변수로 매핑
 ```
+
+**현재 설정**
+- LLM: `claude-sonnet-4-6` / provider: `anthropic`
+- 임베딩: `BAAI/bge-m3` / provider: `huggingface` (로컬, API 키 불필요)
 
 ### `app/core/client.py` — 백엔드 API 클라이언트
 - `httpx.AsyncClient`를 컨텍스트 매니저로 감싸서 제공
@@ -74,7 +84,7 @@ Hololog-AI/
 ```
 2026학년도학교급식기본계획.pdf  →  PyMuPDF 텍스트 추출
                                  →  RecursiveCharacterTextSplitter (500자/50 overlap)
-                                 →  OpenAI text-embedding-3-small
+                                 →  BAAI/bge-m3 (HuggingFace 로컬 임베딩)
                                  →  ChromaDB "policy" 컬렉션
 
 학교급식_식단작성_참고자료.pdf   →  (동일 과정)
@@ -82,14 +92,14 @@ Hololog-AI/
 
 20251229_음식DB 19495건.xlsx    →  pandas 행 단위 읽기
                                  →  각 행을 "식품명: X, 에너지: Ykcal, ..." 자연어로 변환
-                                 →  OpenAI 임베딩
+                                 →  BAAI/bge-m3 (HuggingFace 로컬 임베딩)
                                  →  ChromaDB "food_db" 컬렉션 (19,495개 문서)
 ```
 
 ### `app/rag/retriever.py` — ChromaDB 검색
 - `search(컬렉션명, 쿼리, n_results)` — 유사 문서 리스트 반환
 - `search_joined(...)` — 검색 결과를 하나의 문자열로 합쳐서 반환
-- ChromaDB 클라이언트와 OpenAI 클라이언트를 모듈 수준 싱글톤으로 관리
+- ChromaDB 클라이언트와 임베딩 모델을 모듈 수준 싱글톤으로 관리
 
 ### `app/agent/state.py` — LangGraph 상태
 LangGraph가 노드 간 데이터를 전달할 때 사용하는 공유 상태 객체.
@@ -116,8 +126,8 @@ AgentState = {
 |------|------|
 | `fetch_ingredients` | `GET /ingredients` → `state.ingredients` |
 | `retrieve_context` | RAG: policy + guidelines 검색 → `state.guidelines_context` |
-| `generate_plan` | LLM(GPT-4o) + 구조화 출력(Pydantic) → `state.meal_plan` |
-| `validate_nutrition` | RAG: food_db 검색 + LLM 판단 → `state.validation_errors` |
+| `generate_plan` | claude-sonnet-4-6 + 구조화 출력(Pydantic) → `state.meal_plan` |
+| `validate_nutrition` | RAG: food_db 검색 + LLM 판단 → `state.validation_errors` (**asyncio.gather 병렬**) |
 | `check_budget` | `GET /budgets` → `state.budget_info` |
 | `save_plan` | `POST /diets` + `POST /meals` × 식단 수 |
 
@@ -137,6 +147,7 @@ AgentState = {
     ▼
 ┌─────────────────────────────────────────────────────┐
 │  FastAPI  (app/api/agent.py)                        │
+│  - month YYYY-MM 포맷 검증 (field_validator)         │
 │  - JWT 토큰 추출                                     │
 │  - AgentState 초기화                                 │
 │  - meal_plan_graph.ainvoke(state) 호출               │
@@ -162,12 +173,12 @@ AgentState = {
 │           - 영양 기준 (guidelines_context)           │
 │           - 보유 식자재 (ingredients)                │
 │           - 이전 검증 실패 항목 (재시도 시)            │
-│       └─ GPT-4o with_structured_output(MonthlyPlan) │
+│       └─ claude-sonnet-4-6 with_structured_output   │
 │       └─ state.meal_plan 업데이트                   │
 │                     │                               │
 │  [4] validate_nutrition                             │
 │       └─ 각 메뉴마다 ChromaDB "food_db" 검색         │
-│       └─ LLM으로 영양 기준 충족 여부 판단             │
+│       └─ asyncio.gather로 LLM 판단 병렬 실행         │
 │           (에너지 1/3, 단백질 7~20%,                 │
 │            지방 15~30%, 나트륨 1000mg 이하)           │
 │       └─ state.validation_errors 업데이트            │
@@ -229,7 +240,7 @@ AgentState = {
 ```bash
 # 1. 환경변수 설정
 cp .env.example .env
-# .env 파일에 OPENAI_API_KEY, LANGCHAIN_API_KEY, BACKEND_URL 입력
+# .env 파일에 LLM_API_KEY, LANGCHAIN_API_KEY 입력
 
 # 2. RAG 인덱싱 (최초 1회)
 uv run python app/rag/ingest.py
@@ -249,10 +260,11 @@ uv run uvicorn app.main:app --reload --port 8000
 |--------|------|------|
 | `fastapi` | 0.136 | API 서버 |
 | `langgraph` | 1.2 | 에이전트 워크플로우 상태 머신 |
-| `langchain-openai` | 1.3 | GPT-4o 호출, 구조화 출력 |
+| `langchain` | 1.3 | LLM/임베딩 추상화 (`init_chat_model`) |
+| `langchain-anthropic` | - | claude-sonnet-4-6 호출, 구조화 출력 |
+| `langchain-huggingface` | 1.2 | BAAI/bge-m3 로컬 임베딩 |
 | `langsmith` | 0.8 | LLM 호출 추적/모니터링 |
 | `chromadb` | 1.5 | 로컬 벡터 데이터베이스 |
 | `pymupdf` | 1.27 | PDF 텍스트 추출 |
 | `pandas` | 3.0 | Excel 음식DB 처리 |
 | `httpx` | 0.28 | 백엔드 API 비동기 HTTP 클라이언트 |
-| `pydantic-settings` | 2.14 | 환경변수 관리 |

@@ -9,7 +9,7 @@ import time
 import chromadb
 import fitz  # PyMuPDF
 import pandas as pd
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_experimental.text_splitter import SemanticChunker
 
 from app.core.config import get_embedder, settings
 
@@ -47,7 +47,11 @@ def ingest_pdf(
     doc = fitz.open(pdf_path)
     full_text = "".join(page.get_text() for page in doc)
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = SemanticChunker(
+        embeddings=get_embedder(),
+        breakpoint_threshold_type="percentile",
+        breakpoint_threshold_amount=10,
+    )
     chunks = splitter.split_text(full_text)
 
     collection = _reset_collection(chroma, collection_name)
@@ -58,9 +62,18 @@ def ingest_pdf(
         embeddings = _embed_with_retry(batch)
         ids = [f"{collection_name}_{i + j}" for j in range(len(batch))]
         collection.add(ids=ids, embeddings=embeddings, documents=batch)
-        time.sleep(0.7)
 
     return len(chunks)
+
+
+_FOOD_DB_COLS = [
+    "식품명", "영양성분함량기준량", "에너지(kcal)", "수분(g)", "단백질(g)", "지방(g)",
+    "회분(g)", "탄수화물(g)", "당류(g)", "식이섬유(g)", "칼슘(mg)", "철(mg)",
+    "인(mg)", "칼륨(mg)", "나트륨(mg)", "비타민A(μg RAE)", "레티놀(μg)",
+    "베타카로틴(μg)", "티아민(mg)", "리보플라빈(mg)", "니아신(mg)", "비타민 C(mg)",
+    "비타민 D(μg)", "콜레스테롤(mg)", "포화지방산(g)", "트랜스지방산(g)",
+    "비타민 B12(μg)", "엽산(μg DFE)",
+]
 
 
 def ingest_excel(
@@ -69,23 +82,26 @@ def ingest_excel(
     chroma: chromadb.ClientAPI,
 ) -> int:
     df = pd.read_excel(excel_path)
+    df = df[[c for c in _FOOD_DB_COLS if c in df.columns]]
 
-    def row_to_text(row: pd.Series) -> str:
-        parts = [f"{col}: {val}" for col, val in row.items() if pd.notna(val)]
-        return ", ".join(parts)
+    names = df["식품명"].fillna("").astype(str).tolist()
+    meta_cols = [c for c in df.columns if c != "식품명"]
+    metadatas = [
+        {k: str(v) for k, v in row.items() if pd.notna(v)}
+        for _, row in df[meta_cols].iterrows()
+    ]
 
-    texts = [row_to_text(row) for _, row in df.iterrows()]
     collection = _reset_collection(chroma, collection_name)
 
     batch_size = 100
-    total = len(texts)
+    total = len(names)
     for i in range(0, total, batch_size):
-        batch = texts[i : i + batch_size]
-        embeddings = _embed_with_retry(batch)
-        ids = [f"{collection_name}_{i + j}" for j in range(len(batch))]
-        collection.add(ids=ids, embeddings=embeddings, documents=batch)
+        batch_names = names[i : i + batch_size]
+        batch_meta = metadatas[i : i + batch_size]
+        embeddings = _embed_with_retry(batch_names)
+        ids = [f"{collection_name}_{i + j}" for j in range(len(batch_names))]
+        collection.add(ids=ids, embeddings=embeddings, documents=batch_names, metadatas=batch_meta)
         print(f"  [{collection_name}] {min(i + batch_size, total)}/{total}", end="\r")
-        time.sleep(0.7)
 
     return total
 

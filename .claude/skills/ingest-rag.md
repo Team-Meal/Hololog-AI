@@ -10,7 +10,7 @@ RAG 소스 파일을 처리하여 ChromaDB 3개 컬렉션에 저장합니다.
 | `학교급식_식단작성_참고자료.pdf` | `guidelines` | chunk_size=500, overlap=50 |
 | `20251229_음식DB 19495건.xlsx` | `food_db` | 행 단위, 배치 100 |
 
-임베딩 모델: `text-embedding-3-small` (OpenAI)
+임베딩 모델: `BAAI/bge-m3` (HuggingFace 로컬)
 저장 경로: `chroma_db/` (프로젝트 루트)
 
 ## 실행 명령

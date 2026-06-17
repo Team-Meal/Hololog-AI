@@ -64,3 +64,16 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+## research.md
+
+- 버그 개선, 최적화 등을 하였을 때 관련 내용을 작성
+
+## WORKFLOW.md
+
+- 시스템 구조 및 동작 흐름을 전체 파일을 파악하여 작성한다
+- 사용자가 명령할 때만 작성한다
+
+## AGENT
+
+- ROOT_AGENT.md는 전체를 통괄하고
+- 그 아래 폴더마다 폴더명_agent.md를 구성하여 코드를 짜게 한다.

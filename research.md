@@ -112,3 +112,161 @@
 ---
 [2026-06-14 17:11] [SESSION] 세션 종료
 ---
+
+---
+[2026-06-16 20:50] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 21:01] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 21:14] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 21:15] [SESSION] 세션 종료
+---
+[2026-06-16 21:19] [AGENT] nodes.py 수정 — from __future__ import annotations
+[2026-06-16 21:20] [AGENT] nodes.py 수정 — async def _check_meal(meal: dict) -> dict | None:
+
+---
+[2026-06-16 21:21] [SESSION] 세션 종료
+---
+[2026-06-16 22:57] [RAG] ingest.py 수정 — collection.add(ids=ids, embeddings=embeddings, documents=bat...
+[2026-06-16 22:57] [RAG] ingest.py 수정 — collection.add(ids=ids, embeddings=embeddings, documents=bat...
+
+---
+[2026-06-16 22:57] [SESSION] 세션 종료
+---
+[2026-06-16 22:59] [API] agent.py 수정 — import re
+[2026-06-16 23:00] [API] agent.py 수정 — class GeneratePlanRequest(BaseModel):
+
+---
+[2026-06-16 23:01] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:04] [SESSION] 세션 종료
+---
+[2026-06-16 23:06] [CONFIG] .env 수정 — LLM_API_KEY=AQ.Ab8RN6Ki1Pf3Pzkf2ekWqJAmGok-mp55ZQfTfhEfABSd3...
+[2026-06-16 23:06] [CONFIG] config.py 수정 — load_dotenv()
+[2026-06-16 23:06] [CONFIG] config.py 수정 — settings = get_settings()
+
+---
+[2026-06-16 23:07] [SESSION] 세션 종료
+---
+[2026-06-16 23:09] [CONFIG] config.py 수정 — llm_model: str = "claude-sonnet-4-6"
+[2026-06-16 23:09] [HARNESS] ROOT_AGENT.md 수정 — - **LLM:** claude-sonnet-4-6 (Anthropic) via `init_chat_mode...
+
+---
+[2026-06-16 23:09] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:13] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:18] [SESSION] 세션 종료
+---
+[2026-06-16 23:31] [IMPROVEMENT] .gitkeep 작성
+
+---
+[2026-06-16 23:32] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:35] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:40] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:41] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:42] [SESSION] 세션 종료
+---
+
+---
+[2026-06-16 23:44] [SESSION] 세션 종료
+---
+[2026-06-17 00:01] [RAG] ingest.py 수정 — _FOOD_DB_COLS = [
+
+---
+[2026-06-17 00:01] [SESSION] 세션 종료
+---
+[2026-06-17 00:06] [RAG] ingest.py 수정 — def ingest_excel(
+[2026-06-17 00:06] [RAG] retriever.py 수정 — def search_joined(collection_name: str, query: str, n_result...
+[2026-06-17 00:06] [AGENT] nodes.py 수정 — from app.rag.retriever import search_food, search_joined
+[2026-06-17 00:07] [AGENT] nodes.py 수정 — menu = meal.get("menu_name", "")
+
+---
+[2026-06-17 00:07] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:08] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:08] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:11] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:13] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:15] [SESSION] 세션 종료
+---
+[2026-06-17 00:18] [RAG] retriever.py 수정 — from __future__ import annotations
+[2026-06-17 00:18] [RAG] retriever.py 수정 — def search_food(query: str, n_results: int = 5) -> str:
+
+---
+[2026-06-17 00:18] [SESSION] 세션 종료
+---
+[2026-06-17 00:27] [RAG] ingest.py 수정 — from langchain_text_splitters import SemanticChunker
+[2026-06-17 00:27] [RAG] ingest.py 수정 — splitter = SemanticChunker(
+[2026-06-17 00:35] [RAG] ingest.py 수정 — from langchain_experimental.text_splitter import SemanticChu...
+
+---
+[2026-06-17 00:35] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:38] [SESSION] 세션 종료
+---
+[2026-06-17 00:42] [RAG] retriever.py 작성 — from __future__ import annotations
+[2026-06-17 00:43] [AGENT] nodes.py 수정 — async def retrieve_context(state: AgentState) -> dict:
+[2026-06-17 00:43] [AGENT] nodes.py 수정 — menu = meal.get("menu_name", "")
+[2026-06-17 00:43] [AGENT] nodes.py 수정 — async def _save_meal(client, meal: dict, school_id: int) -> ...
+
+---
+[2026-06-17 00:44] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:45] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:54] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 00:58] [SESSION] 세션 종료
+---
+
+---
+[2026-06-17 01:03] [SESSION] 세션 종료
+---

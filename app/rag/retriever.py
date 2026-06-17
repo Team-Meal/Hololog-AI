@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import chromadb
+from rank_bm25 import BM25Okapi
 
 from app.core.config import get_embedder, settings
 
+# ── 싱글톤 ────────────────────────────────────────────────────────────────────
+
 _chroma: chromadb.ClientAPI | None = None
+_bm25: BM25Okapi | None = None
+_bm25_ids: list[str] = []
 
 
 def _chroma_client() -> chromadb.ClientAPI:
@@ -13,6 +18,24 @@ def _chroma_client() -> chromadb.ClientAPI:
         _chroma = chromadb.PersistentClient(path=settings.chroma_db_path)  # type: ignore[assignment]
     return _chroma  # type: ignore[return-value]
 
+
+def _tok(text: str) -> list[str]:
+    """한국어 식품명용 2-gram 캐릭터 토크나이저."""
+    t = text.replace(" ", "")
+    return [t[i : i + 2] for i in range(len(t) - 1)] or list(t)
+
+
+def _get_bm25() -> tuple[BM25Okapi, list[str]]:
+    global _bm25, _bm25_ids
+    if _bm25 is None:
+        result = _chroma_client().get_collection("food_db").get(include=["documents"])
+        docs: list[str] = result["documents"]
+        _bm25_ids = result["ids"]
+        _bm25 = BM25Okapi([_tok(d) for d in docs])
+    return _bm25, _bm25_ids
+
+
+# ── 검색 ──────────────────────────────────────────────────────────────────────
 
 def search(collection_name: str, query: str, n_results: int = 5) -> list[str]:
     client = _chroma_client()
@@ -33,3 +56,48 @@ def search(collection_name: str, query: str, n_results: int = 5) -> list[str]:
 def search_joined(collection_name: str, query: str, n_results: int = 5) -> str:
     docs = search(collection_name, query, n_results)
     return "\n\n".join(docs)
+
+
+def search_food(query: str, n_results: int = 5) -> str:
+    """food_db 하이브리드 검색 (BM25 + 벡터) — RRF 병합 후 식품명 + 영양성분 반환."""
+    try:
+        collection = _chroma_client().get_collection("food_db")
+    except Exception:
+        return ""
+
+    fetch = n_results * 2
+
+    # 벡터 검색
+    embedding = get_embedder().embed_query(query)
+    vec = collection.query(
+        query_embeddings=[embedding],
+        n_results=fetch,
+        include=["ids"],
+    )
+    vec_ids: list[str] = vec["ids"][0]
+
+    # BM25 검색
+    bm25, all_ids = _get_bm25()
+    scores = bm25.get_scores(_tok(query))
+    bm25_ids = [
+        all_ids[i]
+        for i in sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[:fetch]
+    ]
+
+    # RRF 병합 (k=60)
+    rrf: dict[str, float] = {}
+    for rank, id_ in enumerate(vec_ids):
+        rrf[id_] = rrf.get(id_, 0.0) + 1 / (60 + rank + 1)
+    for rank, id_ in enumerate(bm25_ids):
+        rrf[id_] = rrf.get(id_, 0.0) + 1 / (60 + rank + 1)
+
+    top_ids = sorted(rrf, key=rrf.__getitem__, reverse=True)[:n_results]
+
+    # 최종 데이터 조회
+    final = collection.get(ids=top_ids, include=["documents", "metadatas"])
+    parts = []
+    for name, meta in zip(final["documents"], final["metadatas"]):
+        meta_str = ", ".join(f"{k}: {v}" for k, v in meta.items())
+        parts.append(f"{name} — {meta_str}")
+
+    return "\n\n".join(parts)

@@ -4,6 +4,7 @@ LangGraph 노드 함수 모음.
 """
 from __future__ import annotations
 
+import asyncio
 import calendar
 from datetime import date
 
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 from app.agent.state import AgentState
 from app.core.client import backend_client
 from app.core.config import settings
-from app.rag.retriever import search_joined
+from app.rag.retriever import search_food, search_joined
 
 # ── LLM (싱글톤) ──────────────────────────────────────────────────────────────
 
@@ -76,10 +77,12 @@ async def fetch_ingredients(state: AgentState) -> dict:
 
 
 async def retrieve_context(state: AgentState) -> dict:
-    """RAG: policy + guidelines 컬렉션에서 급식 기준 검색."""
+    """RAG: policy + guidelines 컬렉션에서 급식 기준 검색 (병렬)."""
     query = f"{state['month']} 학교급식 영양 기준 식단 작성"
-    policy = search_joined("policy", query, n_results=5)
-    guidelines = search_joined("guidelines", query, n_results=5)
+    policy, guidelines = await asyncio.gather(
+        asyncio.to_thread(search_joined, "policy", query, 5),
+        asyncio.to_thread(search_joined, "guidelines", query, 5),
+    )
     context = f"[급식 정책]\n{policy}\n\n[식단 작성 가이드라인]\n{guidelines}"
     return {"guidelines_context": context}
 
@@ -124,38 +127,36 @@ async def generate_plan(state: AgentState) -> dict:
     }
 
 
+async def _check_meal(meal: dict) -> dict | None:
+    menu = meal.get("menu_name", "")
+    docs = await asyncio.to_thread(search_food, menu, 3)
+    check_prompt = (
+        f"다음 메뉴의 영양 정보를 참고하여 학교급식 영양 기준(에너지 1/3, "
+        f"단백질 7~20%, 지방 15~30%, 나트륨 1000mg 이하)을 충족하는지 판단하세요.\n\n"
+        f"메뉴: {menu}\n"
+        f"추정 영양정보 (DB 참고):\n{docs}\n\n"
+        f"식단 추정값: kcal={meal.get('estimated_kcal')}, "
+        f"단백질={meal.get('estimated_protein_g')}g, "
+        f"지방={meal.get('estimated_fat_g')}g, "
+        f"나트륨={meal.get('estimated_sodium_mg')}mg\n\n"
+        "기준 미달이면 'FAIL: <이유>', 충족이면 'PASS'로만 답하세요."
+    )
+    resp = await _get_llm().ainvoke([HumanMessage(content=check_prompt)])
+    verdict = resp.content.strip()
+    if verdict.startswith("FAIL"):
+        return {
+            "date": meal.get("date"),
+            "meal_type": meal.get("meal_type"),
+            "menu": menu,
+            "issue": verdict.replace("FAIL:", "").strip(),
+        }
+    return None
+
+
 async def validate_nutrition(state: AgentState) -> dict:
-    """RAG food_db로 각 메뉴 영양소 추정 → 기준 미달 항목 수집."""
-    errors: list[dict] = []
-
-    for meal in state["meal_plan"]:
-        menu = meal.get("menu_name", "")
-        docs = search_joined("food_db", menu, n_results=3)
-
-        # LLM에게 영양 검증 판단 위임 (소형 판단)
-        check_prompt = (
-            f"다음 메뉴의 영양 정보를 참고하여 학교급식 영양 기준(에너지 1/3, "
-            f"단백질 7~20%, 지방 15~30%, 나트륨 1000mg 이하)을 충족하는지 판단하세요.\n\n"
-            f"메뉴: {menu}\n"
-            f"추정 영양정보 (DB 참고):\n{docs}\n\n"
-            f"식단 추정값: kcal={meal.get('estimated_kcal')}, "
-            f"단백질={meal.get('estimated_protein_g')}g, "
-            f"지방={meal.get('estimated_fat_g')}g, "
-            f"나트륨={meal.get('estimated_sodium_mg')}mg\n\n"
-            "기준 미달이면 'FAIL: <이유>', 충족이면 'PASS'로만 답하세요."
-        )
-
-        resp = await _get_llm().ainvoke([HumanMessage(content=check_prompt)])
-        verdict = resp.content.strip()
-
-        if verdict.startswith("FAIL"):
-            errors.append({
-                "date": meal.get("date"),
-                "meal_type": meal.get("meal_type"),
-                "menu": menu,
-                "issue": verdict.replace("FAIL:", "").strip(),
-            })
-
+    """RAG food_db로 각 메뉴 영양소 추정 → 기준 미달 항목 수집 (병렬)."""
+    results = await asyncio.gather(*[_check_meal(m) for m in state["meal_plan"]])
+    errors = [r for r in results if r is not None]
     return {"validation_errors": errors}
 
 
@@ -171,37 +172,37 @@ async def check_budget(state: AgentState) -> dict:
         return {"budget_info": {"warning": f"예산 조회 실패: {e}"}}
 
 
+async def _save_meal(client, meal: dict, school_id: int) -> None:
+    diet_resp = await client.post("/diets", json={
+        "date": meal["date"],
+        "meal_type": meal["meal_type"],
+        "school_id": school_id,
+    })
+    diet_resp.raise_for_status()
+    diet_id = diet_resp.json().get("id")
+    meal_resp = await client.post("/meals", json={
+        "diet_id": diet_id,
+        "menu_name": meal["menu_name"],
+        "kcal": meal["estimated_kcal"],
+        "protein": meal["estimated_protein_g"],
+        "fat": meal["estimated_fat_g"],
+        "sodium": meal["estimated_sodium_mg"],
+    })
+    meal_resp.raise_for_status()
+
+
 async def save_plan(state: AgentState) -> dict:
-    """생성된 식단을 /diets + /meals API로 저장."""
-    saved: list[dict] = []
-    errors: list[str] = []
-
+    """생성된 식단을 /diets + /meals API로 저장 (병렬)."""
     async with backend_client(state["auth_token"]) as client:
-        for meal in state["meal_plan"]:
-            try:
-                # 1. 식단 생성
-                diet_resp = await client.post("/diets", json={
-                    "date": meal["date"],
-                    "meal_type": meal["meal_type"],
-                    "school_id": state["school_id"],
-                })
-                diet_resp.raise_for_status()
-                diet_id = diet_resp.json().get("id")
-
-                # 2. 메뉴 저장
-                meal_resp = await client.post("/meals", json={
-                    "diet_id": diet_id,
-                    "menu_name": meal["menu_name"],
-                    "kcal": meal["estimated_kcal"],
-                    "protein": meal["estimated_protein_g"],
-                    "fat": meal["estimated_fat_g"],
-                    "sodium": meal["estimated_sodium_mg"],
-                })
-                meal_resp.raise_for_status()
-                saved.append({"diet_id": diet_id, "menu": meal["menu_name"]})
-            except Exception as e:
-                errors.append(f"{meal.get('date')} {meal.get('meal_type')}: {e}")
-
+        results = await asyncio.gather(
+            *[_save_meal(client, meal, state["school_id"]) for meal in state["meal_plan"]],
+            return_exceptions=True,
+        )
+    errors = [
+        f"{meal.get('date')} {meal.get('meal_type')}: {r}"
+        for meal, r in zip(state["meal_plan"], results)
+        if isinstance(r, Exception)
+    ]
     if errors:
         return {"error": f"일부 저장 실패: {'; '.join(errors[:3])}"}
     return {"error": None}

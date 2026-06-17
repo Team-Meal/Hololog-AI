@@ -6,15 +6,21 @@ from langchain.embeddings import init_embeddings
 from langchain_core.embeddings import Embeddings
 from pydantic import BaseModel
 
-load_dotenv()  # .env의 API 키를 os.environ에 직접 세팅
+load_dotenv()
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
 os.environ.setdefault("LANGCHAIN_PROJECT", "hololog-ai")
+
+_PROVIDER_KEY_MAP = {
+    "google_genai": "GOOGLE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
 
 
 class Settings(BaseModel):
     # LLM — 여기서 직접 수정
-    llm_model: str = "gemini-3.5-flash"
-    llm_provider: str = "google_genai"  # google_genai | openai | anthropic
+    llm_model: str = "claude-sonnet-4-6"
+    llm_provider: str = "anthropic"  # google_genai | openai | anthropic
 
     # 임베딩 — 여기서 직접 수정
     embedding_provider: str = "huggingface"  # openai | google_genai | huggingface
@@ -27,9 +33,9 @@ class Settings(BaseModel):
     chroma_db_path: str = "./chroma_db"
 
     # RAG 소스 파일
-    policy_pdf_path: str = "./2026학년도학교급식기본계획.pdf"
-    guidelines_pdf_path: str = "./학교급식_식단작성_참고자료.pdf"
-    food_db_excel_path: str = "./20251229_음식DB 19495건.xlsx"
+    policy_pdf_path: str = "./data/2026학년도학교급식기본계획.pdf"
+    guidelines_pdf_path: str = "./data/학교급식_식단작성_참고자료 (1).pdf"
+    food_db_excel_path: str = "./data/20251229_음식DB 19495건.xlsx"
 
 
 @lru_cache
@@ -38,6 +44,11 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+# LLM_API_KEY → provider별 환경변수로 매핑 (config.py의 llm_provider 변경만으로 전환 가능)
+_llm_api_key = os.environ.get("LLM_API_KEY", "")
+if _llm_api_key and settings.llm_provider in _PROVIDER_KEY_MAP:
+    os.environ.setdefault(_PROVIDER_KEY_MAP[settings.llm_provider], _llm_api_key)
 
 _embedder: Embeddings | None = None
 
