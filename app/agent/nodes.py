@@ -5,8 +5,6 @@ LangGraph 노드 함수 모음.
 from __future__ import annotations
 
 import asyncio
-import calendar
-from datetime import date
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -60,18 +58,6 @@ class NutritionVerdict(BaseModel):
     issue: str = ""
 
 
-# ── 유틸 ──────────────────────────────────────────────────────────────────────
-
-def _weekdays_in_month(year: int, month: int) -> list[str]:
-    """해당 월의 주중(월~금) 날짜 목록 반환."""
-    _, last_day = calendar.monthrange(year, month)
-    return [
-        date(year, month, d).isoformat()
-        for d in range(1, last_day + 1)
-        if date(year, month, d).weekday() < 5
-    ]
-
-
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
 
 async def fetch_ingredients(state: AgentState) -> dict:
@@ -87,25 +73,37 @@ async def fetch_ingredients(state: AgentState) -> dict:
 
 async def retrieve_context(state: AgentState) -> dict:
     """RAG: policy + guidelines 컬렉션에서 급식 기준 검색 (병렬)."""
-    query = f"{state['month']} 학교급식 영양 기준 식단 작성"
+    month_num = int(state["month"].split("-")[1])
+    nutrition_query = "학교급식 영양기준 에너지 단백질 지방 나트륨 칼슘"
+    planning_query = f"{month_num}월 학교급식 식단작성 메뉴 다양성 계절"
     policy, guidelines = await asyncio.gather(
-        asyncio.to_thread(search_joined, "policy", query, 5),
-        asyncio.to_thread(search_joined, "guidelines", query, 5),
+        asyncio.to_thread(search_joined, "policy", nutrition_query, 5),
+        asyncio.to_thread(search_joined, "guidelines", planning_query, 5),
     )
-    context = f"[급식 정책]\n{policy}\n\n[식단 작성 가이드라인]\n{guidelines}"
+    context = f"[급식 정책 — 영양기준]\n{policy}\n\n[식단 작성 가이드라인]\n{guidelines}"
     return {"guidelines_context": context}
+
+
+_MEAL_TYPES = ["BREAKFAST", "LUNCH", "DINNER"]
 
 
 async def generate_plan(state: AgentState) -> dict:
     """LLM으로 월간 식단 초안 생성. 재시도 시 이전 오류 컨텍스트 포함."""
     if state.get("error"):
         return {}
-    year, month = map(int, state["month"].split("-"))
-    school_days = _weekdays_in_month(year, month)
+
+    school_days = state["school_days"]
+    total_meals = len(school_days) * len(_MEAL_TYPES)
+
     ingredients_text = "\n".join(
         f"- {item.get('name', '?')} {item.get('quantity', '?')}{item.get('unit', '')}"
         for item in state["ingredients"]
     ) or "정보 없음"
+
+    schedule = "\n".join(
+        f"{day}: {', '.join(_MEAL_TYPES)}"
+        for day in school_days
+    )
 
     error_section = ""
     if state["validation_errors"]:
@@ -116,14 +114,23 @@ async def generate_plan(state: AgentState) -> dict:
         error_section = f"\n\n[이전 시도 문제점 — 반드시 개선]\n{error_lines}"
 
     system = SystemMessage(content=(
-        "당신은 학교급식 월간 식단 계획 전문가입니다. "
-        "주어진 식자재와 영양 기준에 맞는 한 달 치 식단을 JSON으로 작성하세요. "
-        "한국 학교 급식에 적합한 메뉴를 선택하고, 같은 메뉴가 주 2회 이상 반복되지 않도록 하세요."
+        "당신은 학교급식 월간 식단 계획 전문가입니다.\n"
+        "아래 규칙을 엄격히 따라 JSON 형식으로 작성하세요.\n\n"
+        "【필수 규칙】\n"
+        "1. 제공된 급식 일정의 모든 날짜에 조식(BREAKFAST)·중식(LUNCH)·석식(DINNER) 세 끼를 빠짐없이 작성합니다.\n"
+        "2. 일정에 없는 날(주말·공휴일)에는 절대 식단을 작성하지 않습니다.\n\n"
+        "【다양성 규칙】\n"
+        "3. 동일 메뉴는 한 달에 최대 1회만 등장합니다.\n"
+        "4. 단백질 주재료(돼지고기·닭고기·소고기·생선·두부·계란 등)가 하루 세 끼 내에서 중복되지 않도록 합니다.\n"
+        "5. 조리법(볶음·찜·국·구이·조림·무침·튀김·전 등)을 매일 다양하게 조합합니다.\n"
+        "6. 국/탕/찌개류는 각 끼니별 최대 한 가지만 포함합니다.\n"
+        "7. 조식은 가볍게(죽·샌드위치·토스트·미음 계열), 중식·석식은 밥+국+반찬 구성을 권장합니다.\n\n"
+        "한국 학교 급식에 적합한 메뉴를 선택하세요."
     ))
     human = HumanMessage(content=(
         f"대상 월: {state['month']}\n"
-        f"급식 일자: {', '.join(school_days)}\n\n"
-        f"[영양 기준]\n{state['guidelines_context']}\n\n"
+        f"급식 일정 ({len(school_days)}일 × 3끼 = {total_meals}개 메뉴):\n{schedule}\n\n"
+        f"[영양 기준 및 가이드라인]\n{state['guidelines_context']}\n\n"
         f"[보유 식자재]\n{ingredients_text}"
         f"{error_section}"
     ))

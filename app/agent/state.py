@@ -5,6 +5,7 @@ class AgentState(TypedDict):
     month: str          # YYYY-MM
     auth_token: str     # 백엔드 API 인증용
     school_id: int
+    school_days: list[str]          # 급식 제공 날짜 (주말·공휴일 제외, YYYY-MM-DD)
 
     ingredients: list[dict]         # GET /ingredients 결과
     guidelines_context: str         # RAG: policy + guidelines 검색 결과
