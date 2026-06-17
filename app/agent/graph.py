@@ -14,8 +14,11 @@ MAX_RETRIES = 3
 
 
 def _should_regenerate(state: AgentState) -> str:
-    if state["validation_errors"] and state["retry_count"] < MAX_RETRIES:
+    errors = state["validation_errors"]
+    if errors and state["retry_count"] < MAX_RETRIES:
         return "generate_plan"
+    if errors:  # 재시도 소진, 오류 잔존 → 저장 생략
+        return END
     return "check_budget"
 
 
@@ -48,7 +51,7 @@ def build_graph() -> StateGraph:
     g.add_conditional_edges(
         "validate_nutrition",
         _should_regenerate,
-        {"generate_plan": "generate_plan", "check_budget": "check_budget"},
+        {"generate_plan": "generate_plan", "check_budget": "check_budget", END: END},
     )
     g.add_edge("check_budget", "save_plan")
     g.add_edge("save_plan", END)

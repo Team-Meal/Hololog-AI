@@ -81,11 +81,17 @@ async def generate_plan(
             detail=final_state["error"],
         )
 
+    # 재시도 소진 후 검증 실패가 남아있으면 저장 생략됨 (budget_info 없음)
+    warn: str | None = None
+    if final_state.get("validation_errors") and not final_state.get("budget_info"):
+        n = len(final_state["validation_errors"])
+        warn = f"영양 검증 실패 {n}건으로 저장 생략됨"
+
     return GeneratePlanResponse(
         month=body.month,
         total_meals=len(final_state["meal_plan"]),
         meal_plan=final_state["meal_plan"],
         validation_errors=final_state["validation_errors"],
-        budget_info=final_state["budget_info"],
-        error=None,
+        budget_info=final_state.get("budget_info", {}),
+        error=warn,
     )

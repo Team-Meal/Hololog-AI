@@ -10,6 +10,7 @@ from app.core.config import get_embedder, settings
 # ── 싱글톤 ────────────────────────────────────────────────────────────────────
 
 _chroma: chromadb.ClientAPI | None = None
+_chroma_lock = threading.Lock()
 _bm25: BM25Okapi | None = None
 _bm25_ids: list[str] = []
 _bm25_lock = threading.Lock()
@@ -18,7 +19,9 @@ _bm25_lock = threading.Lock()
 def _chroma_client() -> chromadb.ClientAPI:
     global _chroma
     if _chroma is None:
-        _chroma = chromadb.PersistentClient(path=settings.chroma_db_path)  # type: ignore[assignment]
+        with _chroma_lock:
+            if _chroma is None:
+                _chroma = chromadb.PersistentClient(path=settings.chroma_db_path)  # type: ignore[assignment]
     return _chroma  # type: ignore[return-value]
 
 
@@ -77,7 +80,7 @@ def search_food(query: str, n_results: int = 5) -> str:
     vec = collection.query(
         query_embeddings=[embedding],
         n_results=fetch,
-        include=["ids"],
+        include=[],
     )
     vec_ids: list[str] = vec["ids"][0]
 

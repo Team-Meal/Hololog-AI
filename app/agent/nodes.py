@@ -5,6 +5,7 @@ LangGraph 노드 함수 모음.
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -15,10 +16,6 @@ from app.agent.state import AgentState
 from app.core.client import backend_client
 from app.core.config import settings
 from app.rag.retriever import search_food, search_joined
-
-# ── 상수 ──────────────────────────────────────────────────────────────────────
-
-_VALIDATE_SEM = asyncio.Semaphore(5)
 
 # ── LLM (싱글톤) ──────────────────────────────────────────────────────────────
 
@@ -40,7 +37,7 @@ def _get_llm() -> BaseChatModel:
 
 class MealItem(BaseModel):
     date: str           # YYYY-MM-DD
-    meal_type: str      # BREAKFAST | LUNCH | DINNER
+    meal_type: Literal["BREAKFAST", "LUNCH", "DINNER"]
     menu_name: str
     ingredients_used: list[str]
     estimated_kcal: float
@@ -53,22 +50,33 @@ class MonthlyMealPlan(BaseModel):
     meals: list[MealItem]
 
 
-class NutritionVerdict(BaseModel):
+class MealVerdict(BaseModel):
+    date: str
+    meal_type: str
+    menu_name: str
     passed: bool
     issue: str = ""
+
+
+class BatchNutritionVerdict(BaseModel):
+    verdicts: list[MealVerdict]
 
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
 
 async def fetch_ingredients(state: AgentState) -> dict:
-    """GET /ingredients 로 보유 식자재 조회."""
-    try:
-        async with backend_client(state["auth_token"]) as client:
-            resp = await client.get("/ingredients")
-            resp.raise_for_status()
-            return {"ingredients": resp.json(), "error": None}
-    except Exception as e:
-        return {"ingredients": [], "error": f"식자재 조회 실패: {e}"}
+    """GET /ingredients 로 보유 식자재 조회. 일시적 오류 시 최대 3회 재시도."""
+    for attempt in range(3):
+        try:
+            async with backend_client(state["auth_token"]) as client:
+                resp = await client.get("/ingredients")
+                resp.raise_for_status()
+                return {"ingredients": resp.json(), "error": None}
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(1)
+            else:
+                return {"ingredients": [], "error": f"식자재 조회 실패: {e}"}
 
 
 async def retrieve_context(state: AgentState) -> dict:
@@ -138,43 +146,47 @@ async def generate_plan(state: AgentState) -> dict:
     structured = _get_llm().with_structured_output(MonthlyMealPlan)
     result: MonthlyMealPlan = await structured.ainvoke([system, human])
 
+    school_day_set = set(school_days)
+    filtered = [m for m in result.meals if m.date in school_day_set]
+
     return {
-        "meal_plan": [m.model_dump() for m in result.meals],
+        "meal_plan": [m.model_dump() for m in filtered],
         "retry_count": state["retry_count"] + (1 if state["validation_errors"] else 0),
         "validation_errors": [],
     }
 
 
-async def _check_meal(meal: dict) -> dict | None:
-    async with _VALIDATE_SEM:
-        menu = meal.get("menu_name", "")
-        docs = await asyncio.to_thread(search_food, menu, 3)
-        check_prompt = (
-            f"다음 메뉴의 영양 정보를 참고하여 학교급식 영양 기준(에너지 1/3, "
-            f"단백질 7~20%, 지방 15~30%, 나트륨 1000mg 이하)을 충족하는지 판단하세요.\n\n"
-            f"메뉴: {menu}\n"
-            f"추정 영양정보 (DB 참고):\n{docs}\n\n"
-            f"식단 추정값: kcal={meal.get('estimated_kcal')}, "
-            f"단백질={meal.get('estimated_protein_g')}g, "
-            f"지방={meal.get('estimated_fat_g')}g, "
-            f"나트륨={meal.get('estimated_sodium_mg')}mg"
-        )
-        structured = _get_llm().with_structured_output(NutritionVerdict)
-        result: NutritionVerdict = await structured.ainvoke([HumanMessage(content=check_prompt)])
-        if not result.passed:
-            return {
-                "date": meal.get("date"),
-                "meal_type": meal.get("meal_type"),
-                "menu": menu,
-                "issue": result.issue,
-            }
-        return None
-
-
 async def validate_nutrition(state: AgentState) -> dict:
-    """RAG food_db로 각 메뉴 영양소 추정 → 기준 미달 항목 수집 (병렬)."""
-    results = await asyncio.gather(*[_check_meal(m) for m in state["meal_plan"]])
-    errors = [r for r in results if r is not None]
+    """RAG food_db로 전체 메뉴 영양소 검증 — search_food 병렬 후 LLM 배치 1회 호출."""
+    meals = state["meal_plan"]
+    if not meals:
+        return {"validation_errors": []}
+
+    docs_list = await asyncio.gather(*[
+        asyncio.to_thread(search_food, m.get("menu_name", ""), 3)
+        for m in meals
+    ])
+
+    lines = [
+        f"{i + 1}. {m['date']} [{m['meal_type']}] {m['menu_name']}\n"
+        f"   추정: kcal={m['estimated_kcal']}, 단백질={m['estimated_protein_g']}g, "
+        f"지방={m['estimated_fat_g']}g, 나트륨={m['estimated_sodium_mg']}mg\n"
+        f"   영양DB: {docs or '정보없음'}"
+        for i, (m, docs) in enumerate(zip(meals, docs_list))
+    ]
+
+    prompt = (
+        "각 메뉴가 학교급식 영양 기준(에너지 1/3, 단백질 7~20%, 지방 15~30%, 나트륨 1000mg 이하)을 "
+        "충족하는지 판단하고 date·meal_type·menu_name·passed·issue를 반환하세요.\n\n"
+        + "\n\n".join(lines)
+    )
+    structured = _get_llm().with_structured_output(BatchNutritionVerdict)
+    result: BatchNutritionVerdict = await structured.ainvoke([HumanMessage(content=prompt)])
+
+    errors = [
+        {"date": v.date, "meal_type": v.meal_type, "menu": v.menu_name, "issue": v.issue}
+        for v in result.verdicts if not v.passed
+    ]
     return {"validation_errors": errors}
 
 
