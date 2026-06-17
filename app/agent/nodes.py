@@ -5,6 +5,7 @@ LangGraph 노드 함수 모음.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
@@ -128,7 +129,7 @@ async def generate_plan(state: AgentState) -> dict:
         "1. 제공된 급식 일정의 모든 날짜에 조식(BREAKFAST)·중식(LUNCH)·석식(DINNER) 세 끼를 빠짐없이 작성합니다.\n"
         "2. 일정에 없는 날(주말·공휴일)에는 절대 식단을 작성하지 않습니다.\n\n"
         "【다양성 규칙】\n"
-        "3. 동일 메뉴가 같은 주(월~금)에 3회 이상 등장하지 않습니다.\n"
+        "3. 동일 메뉴는 한 달 전체에서 5회를 초과하지 않으며, 같은 주(월~금)에 3회 이상 등장하지 않습니다.\n"
         "4. 단백질 주재료(돼지고기·닭고기·소고기·생선·두부·계란 등)가 하루 세 끼 내에서 중복되지 않도록 합니다.\n"
         "5. 조리법(볶음·찜·국·구이·조림·무침·튀김·전 등)을 매일 다양하게 조합합니다.\n"
         "6. 국/탕/찌개류는 각 끼니별 최대 한 가지만 포함합니다.\n"
@@ -187,6 +188,18 @@ async def validate_nutrition(state: AgentState) -> dict:
         {"date": v.date, "meal_type": v.meal_type, "menu": v.menu_name, "issue": v.issue}
         for v in result.verdicts if not v.passed
     ]
+
+    # 코드 레벨 빈도 강제: 월 6회 이상 등장 시 무조건 재시도 유발
+    menu_counts = Counter(m.get("menu_name", "") for m in meals)
+    for name, cnt in menu_counts.items():
+        if cnt >= 6:
+            errors.append({
+                "date": "-",
+                "meal_type": "-",
+                "menu": name,
+                "issue": f"월 {cnt}회 등장 — 5회 이하로 줄이세요",
+            })
+
     return {"validation_errors": errors}
 
 
