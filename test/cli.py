@@ -1,9 +1,10 @@
 """
 로컬 테스트용 CLI.
-실행: uv run python scripts/cli.py
+실행: uv run python test/cli.py
 """
 import json
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -72,7 +73,10 @@ def main() -> None:
 
     save = ask("\n전체 결과를 JSON으로 저장할까요? (y/N)", "N")
     if save.lower() == "y":
-        path = ask("저장 경로", f"meal_plan_{month}.json")
+        result_dir = Path(__file__).parent / "result"
+        result_dir.mkdir(exist_ok=True)
+        default_path = result_dir / f"meal_plan_{month}.json"
+        path = ask("저장 경로", str(default_path))
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         print(f"저장 완료: {path}")
