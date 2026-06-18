@@ -4,9 +4,7 @@ __pycache__/
 *.pyc
 chroma_db/
 
-# RAG 소스 파일 (data/ 폴더 내용물만 제외, .gitkeep은 추적)
-data/*
-!data/.gitkeep
+# RAG 소스 파일
 *.egg-info/
 dist/
 .pytest_cache/
