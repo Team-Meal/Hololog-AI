@@ -2,13 +2,19 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agent.nodes import (
     check_budget,
+    check_single_budget,
     fetch_ingredients,
     generate_plan,
+    generate_single_meal,
+    resolve_excluded_names,
     retrieve_context,
+    retrieve_single_context,
     save_plan,
+    save_single_plan,
     validate_nutrition,
+    validate_single_nutrition,
 )
-from app.agent.state import AgentState
+from app.agent.state import AgentState, SingleMealState
 
 MAX_RETRIES = 3
 
@@ -60,3 +66,53 @@ def build_graph() -> StateGraph:
 
 
 meal_plan_graph = build_graph().compile()
+
+
+def _after_single_generate(state: SingleMealState) -> str:
+    if state.get("error"):
+        return END
+    return "validate_single_nutrition"
+
+
+def _should_single_regenerate(state: SingleMealState) -> str:
+    errors = state.get("validation_errors", [])
+    if errors and state.get("retry_count", 0) < MAX_RETRIES:
+        return "generate_single_meal"
+    if errors:
+        return END    # 재시도 소진 → 저장 생략
+    return "check_single_budget"
+
+
+def build_single_meal_graph() -> StateGraph:
+    g = StateGraph(SingleMealState)
+
+    g.add_node("resolve_excluded", resolve_excluded_names)
+    g.add_node("retrieve_context", retrieve_single_context)
+    g.add_node("generate_single_meal", generate_single_meal)
+    g.add_node("validate_single_nutrition", validate_single_nutrition)
+    g.add_node("check_single_budget", check_single_budget)
+    g.add_node("save_single_plan", save_single_plan)
+
+    g.add_edge(START, "resolve_excluded")
+    g.add_edge(START, "retrieve_context")
+    g.add_edge("resolve_excluded", "generate_single_meal")
+    g.add_edge("retrieve_context", "generate_single_meal")
+    g.add_conditional_edges(
+        "generate_single_meal",
+        _after_single_generate,
+        {"validate_single_nutrition": "validate_single_nutrition", END: END},
+    )
+    g.add_conditional_edges(
+        "validate_single_nutrition",
+        _should_single_regenerate,
+        {"generate_single_meal": "generate_single_meal",
+         "check_single_budget": "check_single_budget",
+         END: END},
+    )
+    g.add_edge("check_single_budget", "save_single_plan")
+    g.add_edge("save_single_plan", END)
+
+    return g
+
+
+single_meal_graph = build_single_meal_graph().compile()

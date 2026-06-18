@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import chromadb
 from rank_bm25 import BM25Okapi
@@ -75,22 +76,30 @@ def search_food(query: str, n_results: int = 5) -> str:
 
     fetch = n_results * 2
 
-    # 벡터 검색
+    # embedding은 1회만 수행
     embedding = get_embedder().embed_query(query)
-    vec = collection.query(
-        query_embeddings=[embedding],
-        n_results=fetch,
-        include=[],
-    )
-    vec_ids: list[str] = vec["ids"][0]
+    tok = _tok(query)
 
-    # BM25 검색
-    bm25, all_ids = _get_bm25()
-    scores = bm25.get_scores(_tok(query))
-    bm25_ids = [
-        all_ids[i]
-        for i in sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[:fetch]
-    ]
+    def _vec_search():
+        return collection.query(query_embeddings=[embedding], n_results=fetch, include=[])
+
+    def _bm25_search():
+        bm25, all_ids = _get_bm25()
+        scores = bm25.get_scores(tok)
+        return [
+            all_ids[i]
+            for i in sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[:fetch]
+        ]
+
+    # BM25(numpy)와 벡터(Rust 바인딩) 모두 GIL 해제 → 병렬 실행 가능
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fut_vec = ex.submit(_vec_search)
+        fut_bm25 = ex.submit(_bm25_search)
+        vec_result = fut_vec.result()
+        bm25_ids: list[str] = fut_bm25.result()
+
+    raw = vec_result.get("ids", [[]])
+    vec_ids: list[str] = raw[0] if raw and raw[0] else []
 
     # RRF 병합 (k=60)
     rrf: dict[str, float] = {}
