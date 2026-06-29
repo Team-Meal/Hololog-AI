@@ -1,3 +1,4 @@
+import asyncio
 import calendar
 import re
 from datetime import date as _date, datetime
@@ -9,6 +10,7 @@ from typing import Literal
 
 from app.agent.graph import meal_plan_graph, single_meal_graph
 from app.agent.state import AgentState, SingleMealState
+from app.core.config import settings
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -158,7 +160,16 @@ async def generate_plan(
         "error": None,
     }
 
-    final_state: AgentState = await meal_plan_graph.ainvoke(initial_state)
+    try:
+        final_state: AgentState = await asyncio.wait_for(
+            meal_plan_graph.ainvoke(initial_state),
+            timeout=settings.agent_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"처리 시간 초과 ({settings.agent_timeout_seconds}초)",
+        )
 
     if final_state.get("error"):
         raise HTTPException(

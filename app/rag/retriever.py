@@ -50,7 +50,8 @@ def search(collection_name: str, query: str, n_results: int = 5) -> list[str]:
     client = _chroma_client()
     try:
         collection = client.get_collection(collection_name)
-    except Exception:
+    except Exception as e:
+        print(f"[retriever] '{collection_name}' 컬렉션 조회 실패: {e}")
         return []
 
     embedding = get_embedder().embed_query(query)
@@ -71,7 +72,8 @@ def search_food(query: str, n_results: int = 5) -> str:
     """food_db 하이브리드 검색 (BM25 + 벡터) — RRF 병합 후 식품명 + 영양성분 반환."""
     try:
         collection = _chroma_client().get_collection("food_db")
-    except Exception:
+    except Exception as e:
+        print(f"[retriever] 'food_db' 컬렉션 조회 실패: {e}")
         return ""
 
     fetch = n_results * 2

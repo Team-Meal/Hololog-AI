@@ -5,9 +5,11 @@ LangGraph 노드 함수 모음.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections import Counter
 from typing import Literal
 
+import httpx
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -21,17 +23,20 @@ from app.rag.retriever import search_food, search_joined
 # ── LLM (싱글톤) ──────────────────────────────────────────────────────────────
 
 _llm: BaseChatModel | None = None
+_llm_lock = threading.Lock()
 
 
 def _get_llm() -> BaseChatModel:
     global _llm
     if _llm is None:
-        _llm = init_chat_model(
-            settings.llm_model,
-            model_provider=settings.llm_provider,
-            temperature=0.3,
-            max_retries=settings.llm_max_retries,
-        )
+        with _llm_lock:
+            if _llm is None:
+                _llm = init_chat_model(
+                    settings.llm_model,
+                    model_provider=settings.llm_provider,
+                    temperature=0.3,
+                    max_retries=settings.llm_max_retries,
+                )
     return _llm
 
 
@@ -98,6 +103,8 @@ async def fetch_ingredients(state: AgentState) -> dict:
                 resp.raise_for_status()
                 return {"ingredients": resp.json(), "error": None}
         except Exception as e:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                return {"ingredients": [], "error": f"식자재 조회 실패: {e}"}
             if attempt < 2:
                 await asyncio.sleep(1)
             else:
@@ -176,7 +183,10 @@ async def generate_plan(state: AgentState) -> dict:
     ))
 
     structured = _get_llm().with_structured_output(MonthlyMealPlan)
-    result: MonthlyMealPlan = await structured.ainvoke([system, human])
+    try:
+        result: MonthlyMealPlan = await structured.ainvoke([system, human])
+    except Exception as e:
+        return {"error": f"식단 생성 실패: {e}"}
 
     school_day_set = set(school_days)
     filtered = [m for m in result.meals if m.date in school_day_set]
@@ -260,11 +270,16 @@ async def validate_nutrition(state: AgentState) -> dict:
             + "\n\n".join(lines)
         )
         structured = _get_llm().with_structured_output(BatchNutritionVerdict)
-        result: BatchNutritionVerdict = await structured.ainvoke([HumanMessage(content=prompt)])
-        errors += [
-            {"date": v.date, "meal_type": v.meal_type, "menu": v.menu_name, "issue": v.issue}
-            for v in result.verdicts if not v.passed
-        ]
+        try:
+            result: BatchNutritionVerdict = await structured.ainvoke([HumanMessage(content=prompt)])
+        except Exception as e:
+            print(f"[validate_nutrition] LLM 호출 실패, 검증 건너뜀: {e}")
+            result = None
+        if result is not None:
+            errors += [
+                {"date": v.date, "meal_type": v.meal_type, "menu": v.menu_name, "issue": v.issue}
+                for v in result.verdicts if not v.passed
+            ]
 
     # 4. 완전성 검사: 급식일 × 3끼 누락 감지
     school_days_list = state.get("school_days", [])

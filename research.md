@@ -340,3 +340,25 @@
 ---
 [2026-06-18 19:14] [SESSION] 세션 종료
 ---
+[2026-06-29 13:12] [AGENT] nodes.py 수정 — from __future__ import annotations
+[2026-06-29 13:12] [AGENT] nodes.py 수정 — async def fetch_ingredients(state: AgentState) -> dict:
+[2026-06-29 13:12] [AGENT] nodes.py 수정 — structured = _get_llm().with_structured_output(MonthlyMealPl...
+[2026-06-29 13:13] [AGENT] nodes.py 수정 — structured = _get_llm().with_structured_output(BatchNutritio...
+[2026-06-29 13:13] [RAG] retriever.py 수정 — def search(collection_name: str, query: str, n_results: int ...
+[2026-06-29 13:13] [RAG] retriever.py 수정 — try:
+[2026-06-29 13:13] [RAG] ingest.py 수정 — from __future__ import annotations
+[2026-06-29 13:13] [RAG] ingest.py 수정 — except Exception as e:
+[2026-06-29 13:13] [RAG] ingest.py 수정 — def ingest_pdf(
+[2026-06-29 13:13] [RAG] ingest.py 수정 — def ingest_excel(
+[2026-06-29 13:13] [API] agent.py 수정 — import asyncio
+[2026-06-29 13:13] [API] agent.py 수정 — try:
+
+---
+[2026-06-29 13:14] [SESSION] 세션 종료
+---
+[2026-06-29 13:18] [AGENT] nodes.py 수정 — if _llm is None:
+[2026-06-29 13:18] [AGENT] nodes.py 수정 — structured = _get_llm().with_structured_output(BatchNutritio...
+[2026-06-29 13:19] [AGENT] nodes.py 수정 — if result is not None:
+[2026-06-29 13:19] [API] agent.py 수정 — from app.agent.graph import meal_plan_graph, single_meal_gra...
+[2026-06-29 13:19] [IMPROVEMENT] research.md 수정 — ---
+[2026-06-29 13:20] [IMPROVEMENT] research.md 수정 — ---

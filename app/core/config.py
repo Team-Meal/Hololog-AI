@@ -30,6 +30,9 @@ class Settings(BaseModel):
     food_db_excel_path: str = os.getenv("FOOD_DB_EXCEL_PATH", "./data/20251229_음식DB 19495건.xlsx")
     llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
+    # 그래프 실행 최대 대기 시간 (초)
+    agent_timeout_seconds: int = 600
+
 
 @lru_cache
 def get_settings() -> Settings:
