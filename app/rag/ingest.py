@@ -5,9 +5,11 @@ RAG 소스 파일(PDF 2종, Excel 1종)을 ChromaDB에 인덱싱.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import chromadb
 import fitz  # PyMuPDF
+import httpx
 import pandas as pd
 from langchain_experimental.text_splitter import SemanticChunker  # noqa: E402
 
@@ -21,7 +23,11 @@ def _embed_with_retry(texts: list[str]) -> list[list[float]]:
         try:
             return get_embedder().embed_documents(texts)
         except Exception as e:
-            if "429" in str(e) and attempt < 2:
+            is_rate_limit = (
+                (isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429)
+                or "429" in str(e)
+            )
+            if is_rate_limit and attempt < 2:
                 print(f"\n  rate limit 감지, {_RETRY_WAIT}초 대기 후 재시도...")
                 time.sleep(_RETRY_WAIT)
             else:
@@ -44,6 +50,8 @@ def ingest_pdf(
     collection_name: str,
     chroma: chromadb.ClientAPI,
 ) -> int:
+    if not Path(pdf_path).exists():
+        raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {pdf_path}")
     print(f"[{collection_name}] 텍스트 추출 중...", flush=True)
     with fitz.open(pdf_path) as doc:
         full_text = "".join(page.get_text() for page in doc)
@@ -87,6 +95,8 @@ def ingest_excel(
     collection_name: str,
     chroma: chromadb.ClientAPI,
 ) -> int:
+    if not Path(excel_path).exists():
+        raise FileNotFoundError(f"Excel 파일을 찾을 수 없습니다: {excel_path}")
     print(f"[{collection_name}] Excel 읽는 중...", flush=True)
     df = pd.read_excel(excel_path)
     df = df[[c for c in _FOOD_DB_COLS if c in df.columns]]

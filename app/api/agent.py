@@ -1,13 +1,16 @@
+import asyncio
 import calendar
 import re
-from datetime import date as _date
+from datetime import date as _date, datetime
 
 import holidays as _holidays_lib
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, field_validator
+from typing import Literal
 
-from app.agent.graph import meal_plan_graph
-from app.agent.state import AgentState
+from app.agent.graph import meal_plan_graph, single_meal_graph
+from app.agent.state import AgentState, SingleMealState
+from app.core.config import settings
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -50,6 +53,90 @@ class GeneratePlanResponse(BaseModel):
     error: str | None
 
 
+# ── 단건 식단 추천 ─────────────────────────────────────────────────────────────
+
+class RecommendMealRequest(BaseModel):
+    mealDate: str
+    mealType: Literal["BREAKFAST", "LUNCH", "DINNER"]
+    schoolId: int
+    targetCalories: int | None = None
+    servingCount: int = 1
+    budgetLimit: int | None = None
+    excludedIngredientIds: list[int] = []
+
+    @field_validator("mealDate")
+    @classmethod
+    def validate_meal_date(cls, v: str) -> str:
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("mealDate must be YYYY-MM-DD format")
+        return v
+
+
+class RecommendMealResponse(BaseModel):
+    mealDate: str
+    mealType: str
+    targetCalories: int | None
+    servingCount: int
+    budgetLimit: int | None
+    menus: list[dict]
+    reason: str
+    error: str | None
+
+
+@router.post("/recommend-meal", response_model=RecommendMealResponse)
+async def recommend_meal(
+    body: RecommendMealRequest,
+    authorization: str = Header(...),
+) -> RecommendMealResponse:
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증 토큰 없음")
+
+    initial_state: SingleMealState = {
+        "meal_date": body.mealDate,
+        "meal_type": body.mealType,
+        "auth_token": token,
+        "school_id": body.schoolId,
+        "target_calories": body.targetCalories,
+        "serving_count": body.servingCount,
+        "budget_limit": body.budgetLimit,
+        "excluded_ingredient_ids": body.excludedIngredientIds,
+        "excluded_names": [],
+        "guidelines_context": "",
+        "result": None,
+        "validation_errors": [],
+        "retry_count": 0,
+        "budget_info": {},
+        "error": None,
+    }
+
+    final_state: SingleMealState = await single_meal_graph.ainvoke(initial_state)
+
+    if final_state.get("error"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=final_state["error"])
+
+    warn: str | None = None
+    if final_state.get("validation_errors") and not final_state.get("budget_info"):
+        n = len(final_state["validation_errors"])
+        warn = f"영양 검증 실패 {n}건으로 저장 생략됨"
+
+    result = final_state.get("result") or {}
+    return RecommendMealResponse(
+        mealDate=body.mealDate,
+        mealType=body.mealType,
+        targetCalories=body.targetCalories,
+        servingCount=body.servingCount,
+        budgetLimit=body.budgetLimit,
+        menus=result.get("menus", []),
+        reason=result.get("reason", ""),
+        error=warn,
+    )
+
+
+# ── 월간 식단 생성 ─────────────────────────────────────────────────────────────
+
 @router.post("/generate-plan", response_model=GeneratePlanResponse)
 async def generate_plan(
     body: GeneratePlanRequest,
@@ -73,7 +160,16 @@ async def generate_plan(
         "error": None,
     }
 
-    final_state: AgentState = await meal_plan_graph.ainvoke(initial_state)
+    try:
+        final_state: AgentState = await asyncio.wait_for(
+            meal_plan_graph.ainvoke(initial_state),
+            timeout=settings.agent_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"처리 시간 초과 ({settings.agent_timeout_seconds}초)",
+        )
 
     if final_state.get("error"):
         raise HTTPException(

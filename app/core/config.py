@@ -19,24 +19,19 @@ _PROVIDER_KEY_MAP = {
 
 
 class Settings(BaseModel):
-    # LLM — 여기서 직접 수정
-    llm_model: str = "claude-sonnet-4-6"
-    llm_provider: str = "anthropic"  # google_genai | openai | anthropic
+    llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+    llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic")
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "huggingface")
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8080")
+    chroma_db_path: str = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+    policy_pdf_path: str = os.getenv("POLICY_PDF_PATH", "./data/2026학년도학교급식기본계획.pdf")
+    guidelines_pdf_path: str = os.getenv("GUIDELINES_PDF_PATH", "./data/학교급식_식단작성_참고자료.pdf")
+    food_db_excel_path: str = os.getenv("FOOD_DB_EXCEL_PATH", "./data/20251229_음식DB 19495건.xlsx")
+    llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
-    # 임베딩 — 여기서 직접 수정
-    embedding_provider: str = "huggingface"  # openai | google_genai | huggingface
-    embedding_model: str = "BAAI/bge-m3"
-
-    # Backend API
-    backend_url: str = "http://localhost:8080"
-
-    # ChromaDB
-    chroma_db_path: str = "./chroma_db"
-
-    # RAG 소스 파일
-    policy_pdf_path: str = "./data/2026학년도학교급식기본계획.pdf"
-    guidelines_pdf_path: str = "./data/학교급식_식단작성_참고자료.pdf"
-    food_db_excel_path: str = "./data/20251229_음식DB 19495건.xlsx"
+    # 그래프 실행 최대 대기 시간 (초)
+    agent_timeout_seconds: int = 600
 
 
 @lru_cache

@@ -5,7 +5,7 @@ Mock 백엔드 서버 (localhost:8080).
 import itertools
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI(title="Mock Backend")
@@ -33,11 +33,14 @@ _INGREDIENTS = [
     {"id": 18, "name": "시금치",   "quantity": 5,   "unit": "kg"},
     {"id": 19, "name": "무",       "quantity": 10,  "unit": "kg"},
     {"id": 20, "name": "버섯",     "quantity": 5,   "unit": "kg"},
+    {"id": 21, "name": "잡곡",     "quantity": 2,   "unit": "kg"},
 ]
 
-# ── ID 자동 증가 ────────────────────────────────────────────────────────────────
+# ── ID 자동 증가 + 인메모리 저장소 ─────────────────────────────────────────────
 
 _id_counter = itertools.count(1)
+_diets: dict[int, dict] = {}
+_meals: dict[int, dict] = {}
 
 
 # ── 요청/응답 스키마 ────────────────────────────────────────────────────────────
@@ -77,13 +80,29 @@ def get_budgets(month: str = ""):
 
 @app.post("/diets", status_code=201)
 def create_diet(body: DietRequest):
-    return {"id": next(_id_counter), "date": body.date, "meal_type": body.meal_type}
+    id_ = next(_id_counter)
+    _diets[id_] = {"id": id_, "date": body.date, "meal_type": body.meal_type}
+    return _diets[id_]
 
 
 @app.post("/meals", status_code=201)
 def create_meal(body: MealRequest):
-    return {"id": next(_id_counter), "diet_id": body.diet_id, "menu_name": body.menu_name}
+    id_ = next(_id_counter)
+    meal = {"id": id_, "diet_id": body.diet_id, "menu_name": body.menu_name}
+    _meals[id_] = meal
+    return meal
+
+
+@app.delete("/diets/{diet_id}")
+def delete_diet(diet_id: int):
+    deleted = _diets.pop(diet_id, None)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail=f"diet {diet_id} not found")
+    to_delete = [mid for mid, m in _meals.items() if m.get("diet_id") == diet_id]
+    for mid in to_delete:
+        _meals.pop(mid, None)
+    return {"deleted": diet_id}
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run("test.mock_backend:app", host="0.0.0.0", port=8080, reload=False)

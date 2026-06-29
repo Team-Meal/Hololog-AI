@@ -14,3 +14,21 @@ class AgentState(TypedDict):
     budget_info: dict               # GET /budgets 결과
     retry_count: int                # 재생성 횟수 (최대 3)
     error: str | None               # 치명적 오류 메시지
+
+
+class SingleMealState(TypedDict):
+    meal_date: str          # YYYY-MM-DD
+    meal_type: str          # BREAKFAST | LUNCH | DINNER
+    auth_token: str
+    school_id: int
+    target_calories: int | None
+    serving_count: int
+    budget_limit: int | None
+    excluded_ingredient_ids: list[int]   # 원본 ID 목록
+    excluded_names: list[str]            # ID → 이름 변환 결과
+    guidelines_context: str
+    result: dict | None     # generate_single_meal 결과
+    validation_errors: list[dict]
+    retry_count: int
+    budget_info: dict
+    error: str | None
