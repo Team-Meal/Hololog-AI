@@ -28,6 +28,7 @@ class Settings(BaseModel):
     policy_pdf_path: str = os.getenv("POLICY_PDF_PATH", "./data/2026학년도학교급식기본계획.pdf")
     guidelines_pdf_path: str = os.getenv("GUIDELINES_PDF_PATH", "./data/학교급식_식단작성_참고자료.pdf")
     food_db_excel_path: str = os.getenv("FOOD_DB_EXCEL_PATH", "./data/20251229_음식DB 19495건.xlsx")
+    llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
 
 @lru_cache
