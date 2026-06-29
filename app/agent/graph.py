@@ -16,7 +16,7 @@ from app.agent.nodes import (
 )
 from app.agent.state import AgentState, SingleMealState
 
-MAX_RETRIES = 3
+MAX_RETRIES = 2
 
 
 def _should_regenerate(state: AgentState) -> str:

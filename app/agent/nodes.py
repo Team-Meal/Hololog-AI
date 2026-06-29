@@ -30,6 +30,7 @@ def _get_llm() -> BaseChatModel:
             settings.llm_model,
             model_provider=settings.llm_provider,
             temperature=0.3,
+            max_retries=settings.llm_max_retries,
         )
     return _llm
 
