@@ -109,10 +109,10 @@ jobs:
         run: |
           sleep 30
           echo "=== Container status ==="
-          docker compose -f docker-compose.prod.yml ps
-          docker compose -f docker-compose.prod.yml ps | grep "ai" | grep -qiE "(Up|running)" || {
+          docker compose --env-file /opt/hololog-ai/.env -f docker-compose.prod.yml ps
+          docker compose --env-file /opt/hololog-ai/.env -f docker-compose.prod.yml ps | grep "ai" | grep -qiE "(Up|running)" || {
             echo "=== AI container logs ==="
-            docker compose -f docker-compose.prod.yml logs ai --tail=50
+            docker compose --env-file /opt/hololog-ai/.env -f docker-compose.prod.yml logs ai --tail=50
             exit 1
           }
 
