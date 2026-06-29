@@ -1,0 +1,32 @@
+services:
+  ai:
+    image: ${AI_IMAGE:-ghcr.io/team-meal/hololog-ai:main}
+    container_name: hololog-ai
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-huggingface}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8080}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-hololog-ai}
+    ports:
+      - "${AI_PORT:-8000}:8000"
+    volumes:
+      - /opt/hololog-ai/data:/app/data
+      - /opt/hololog-ai/chroma_db:/app/chroma_db
+      - /opt/hololog-ai/hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          memory: ${AI_MEM_LIMIT:-2g}
+    restart: unless-stopped
+    networks:
+      - hololog-ai-net
+
+networks:
+  hololog-ai-net:
+    driver: bridge
