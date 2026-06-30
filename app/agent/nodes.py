@@ -19,6 +19,14 @@ from app.agent.state import AgentState, SingleMealState
 from app.core.client import backend_client
 from app.core.config import settings
 from app.rag.retriever import search_food, search_joined
+from app.scoring.scorer import score_ingredients as _score_ingredients
+from app.scoring.metrics import (
+    local_produce_rate,
+    seasonal_rate,
+    cost_per_person,
+    waste_reduction_rate,
+    budget_savings_rate,
+)
 
 # ── LLM (싱글톤) ──────────────────────────────────────────────────────────────
 
@@ -414,6 +422,14 @@ async def generate_single_meal(state: SingleMealState) -> dict:
 
     excluded_line = f"\n제외 식자재 (절대 사용 금지): {', '.join(excluded)}" if excluded else ""
 
+    # 룰 스코어링 결과 — 상위 10개 식자재와 출처 태그를 프롬프트에 포함
+    scored = state.get("scored_ingredients", [])
+    top_scored = sorted(scored, key=lambda x: x.get("total_score", 0), reverse=True)[:10]
+    scored_text = "\n".join(
+        f"  - {s['name']} (점수 {s['total_score']:.2f}) 출처: {', '.join(s['source_tags']) or '없음'}"
+        for s in top_scored
+    ) or "  (정보 없음)"
+
     system = SystemMessage(content=(
         "당신은 학교급식 영양사입니다. 아래 규정에 따라 한 끼 식단을 JSON으로 구성하세요.\n\n"
         f"【끼니 구성 규정】\n{structure_rule}\n\n"
@@ -427,7 +443,15 @@ async def generate_single_meal(state: SingleMealState) -> dict:
         "- estimated_kcal: 이 끼니 1인분 기준 총 칼로리(kcal) 추정치\n"
         "- estimated_protein_g / estimated_fat_g / estimated_sodium_mg: 1인분 기준 추정치\n"
         "- 한국 학교급식에 적합한 메뉴를 선택하세요."
-        f"{excluded_line}"
+        f"{excluded_line}\n\n"
+        "【추천 식자재 (룰 스코어 순위 상위 10개)】\n"
+        f"{scored_text}\n\n"
+        "【출처 태그 규칙】\n"
+        "- reason 필드에 아래 데이터 출처 태그를 문장 안에 반드시 포함하세요.\n"
+        "  [학교재고] 학교 재고 보유 식자재를 활용할 때\n"
+        "  [농사로]   농사로 기준 제철 식자재를 활용할 때\n"
+        "  [KAMIS]    KAMIS 시세 기준 경제적인 식자재를 활용할 때\n"
+        "  예시: '[학교재고] 보유 돼지고기와 [농사로] 6월 제철 채소 오이를 활용했습니다.'"
     ))
     human = HumanMessage(content=(
         f"날짜: {meal_date} ({month_num}월)\n"
@@ -565,3 +589,126 @@ async def save_single_plan(state: SingleMealState) -> dict:
         return {"error": f"식단 저장 실패: {e}"}
 
     return {"error": None}
+
+
+# ── 룰 스코어링 노드 ───────────────────────────────────────────────────────────
+
+async def score_ingredients_single(state: SingleMealState) -> dict:
+    """단건 식단용 — GET /ingredients 조회 후 룰 기반 스코어링 실행."""
+    month = int(state["meal_date"].split("-")[1])
+    try:
+        async with backend_client(state["auth_token"]) as client:
+            resp = await client.get("/ingredients")
+            resp.raise_for_status()
+            ingredients = resp.json()
+    except Exception:
+        ingredients = []
+
+    scored = await _score_ingredients(
+        ingredients=ingredients,
+        excluded_names=state.get("excluded_names", []),
+        month=month,
+        budget_limit=state.get("budget_limit"),
+    )
+    return {"scored_ingredients": [vars(s) for s in scored]}
+
+
+async def score_ingredients(state: AgentState) -> dict:
+    """월간 식단용 — state.ingredients(이미 조회됨)로 룰 기반 스코어링 실행."""
+    month = int(state["month"].split("-")[1])
+    scored = await _score_ingredients(
+        ingredients=state.get("ingredients", []),
+        excluded_names=[],
+        month=month,
+        budget_limit=None,
+    )
+    return {"scored_ingredients": [vars(s) for s in scored]}
+
+
+# ── Q&A 생성 노드 (7.4) ───────────────────────────────────────────────────────
+
+class _QAPair(BaseModel):
+    question: str
+    answer: str
+
+
+class _QAList(BaseModel):
+    pairs: list[_QAPair]
+
+
+async def generate_qa(state: SingleMealState) -> dict:
+    """6개 예상 Q&A 생성 — 실패해도 빈 리스트 반환(비치명)."""
+    result = state.get("result") or {}
+    menus = result.get("menus", [])
+    reason = result.get("reason", "")
+    meal_date = state["meal_date"]
+    meal_type = state["meal_type"]
+    month = int(meal_date.split("-")[1])
+
+    scored = state.get("scored_ingredients", [])
+    seasonal_used = [s["name"] for s in scored if "[농사로]" in s.get("source_tags", [])]
+    inventory_used = [s["name"] for s in scored if "[학교재고]" in s.get("source_tags", [])]
+
+    menu_names = ", ".join(m["name"] for m in menus)
+    all_ingredients = [
+        ing["name"]
+        for menu in menus
+        for ing in menu.get("ingredients", [])
+    ]
+
+    prompt = (
+        f"아래 식단 정보를 바탕으로 6가지 질문에 대한 답변을 JSON으로 작성하세요.\n\n"
+        f"식단: {menu_names}\n"
+        f"날짜: {meal_date} ({month}월) / {meal_type}\n"
+        f"추천 이유: {reason}\n"
+        f"제철 식재료: {', '.join(seasonal_used) or '없음'}\n"
+        f"학교 재고 식재료: {', '.join(inventory_used) or '없음'}\n"
+        f"주요 재료: {', '.join(all_ingredients[:20]) or '없음'}\n"
+        f"예산 제한: {state.get('budget_limit') or '제한 없음'}원/인\n\n"
+        "아래 6가지 질문에 대해 각각 question과 answer 필드로 답변을 작성하세요:\n"
+        "1. 왜 이 메뉴를 추천했나요?\n"
+        "2. 영양 균형은 어떻게 되나요?\n"
+        "3. 제철 식재료가 포함되어 있나요?\n"
+        "4. 예산 내 구성인가요?\n"
+        "5. 알레르기 유의 성분이 있나요?\n"
+        "6. 지역 농산물을 활용했나요?"
+    )
+
+    structured = _get_llm().with_structured_output(_QAList)
+    try:
+        qa_result: _QAList = await structured.ainvoke([HumanMessage(content=prompt)])
+        pairs = [p.model_dump() for p in qa_result.pairs]
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("generate_qa 실패: %s", e)
+        pairs = []
+    return {"qa_pairs": pairs}
+
+
+# ── 지표 계산 노드 (4.2) ──────────────────────────────────────────────────────
+
+async def compute_metrics(state: AgentState) -> dict:
+    """월간 식단 완료 후 5개 지표 산출."""
+    month = int(state["month"].split("-")[1])
+    meal_plan = state.get("meal_plan", [])
+    ingredients_in_stock = [i["name"] for i in state.get("ingredients", [])]
+    scored = state.get("scored_ingredients", [])
+    local_set = {s["name"] for s in scored if "[학교재고]" in s.get("source_tags", [])}
+
+    all_used: list[str] = []
+    for meal in meal_plan:
+        all_used.extend(meal.get("ingredients_used", []))
+
+    budget_info = state.get("budget_info", {})
+    budget_total = float(budget_info.get("total", 0) or 0)
+    budget_used = float(budget_info.get("used", 0) or 0)
+    serving_days = len({m["date"] for m in meal_plan}) or 1
+
+    metrics = {
+        "seasonal_rate": round(seasonal_rate(all_used, month), 2),
+        "local_produce_rate": round(local_produce_rate(all_used, local_set), 2),
+        "cost_per_person": round(cost_per_person(budget_used, serving_days), 2),
+        "waste_reduction_rate": round(waste_reduction_rate(ingredients_in_stock, all_used), 2),
+        "budget_savings_rate": round(budget_savings_rate(budget_total, budget_used), 2),
+    }
+    return {"meal_metrics": metrics}

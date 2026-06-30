@@ -83,6 +83,15 @@
 ---
 [2026-06-17 20:08] [SESSION] 세션 종료
 ---
+[2026-06-30 14:22] [IMPROVEMENT] app/scoring 패키지 신설 — 룰 기반 식자재 스코어링(3.2), 5개 지표 산식(4.2), KAMIS 선택적 연동
+  - seasonal.py: 농사로 기준 월별 제철 식재료 하드코딩 (12개월 × 15~20종)
+  - kamis.py: KAMIS_API_KEY 설정 시 당일가격/평년가격 비율로 0~1 점수 산출, 키 미설정 시 0.5 반환
+  - scorer.py: 제철(0.30)·가격(0.25)·재고(0.30)·선호(0.10)·예산(0.05) 가중합, [학교재고]/[농사로]/[KAMIS] 태그 부여
+  - metrics.py: 지역농산물활용률·제철반영률·1인단가·폐기감소율·예산절감율 순수 함수 정의
+[2026-06-30 14:22] [AGENT] generate_single_meal 프롬프트 수정 — scored_ingredients 상위 10개 + 출처 태그 규칙 삽입
+[2026-06-30 14:22] [AGENT] 노드 4개 추가 — score_ingredients_single, score_ingredients, generate_qa(7.4 Q&A 6개), compute_metrics
+[2026-06-30 14:22] [AGENT] 그래프 배선 변경 — 단건: resolve/retrieve → score → generate → validate → generate_qa → budget → save; 월간: fetch → score → generate, budget → compute_metrics → save
+[2026-06-30 14:22] [API] RecommendMealResponse에 qa_pairs·meal_metrics 추가; GeneratePlanResponse에 meal_metrics 추가
 
 ---
 [2026-06-17 20:08] [SESSION] 세션 종료
@@ -362,3 +371,37 @@
 [2026-06-29 13:19] [API] agent.py 수정 — from app.agent.graph import meal_plan_graph, single_meal_gra...
 [2026-06-29 13:19] [IMPROVEMENT] research.md 수정 — ---
 [2026-06-29 13:20] [IMPROVEMENT] research.md 수정 — ---
+
+---
+[2026-06-29 13:21] [SESSION] 세션 종료
+---
+
+---
+[2026-06-29 13:24] [SESSION] 세션 종료
+---
+
+---
+[2026-06-30 14:01] [SESSION] 세션 종료
+---
+[2026-06-30 14:15] [IMPROVEMENT] __init__.py 작성
+[2026-06-30 14:16] [IMPROVEMENT] seasonal.py 작성 — """
+[2026-06-30 14:16] [IMPROVEMENT] metrics.py 작성 — """
+[2026-06-30 14:16] [CONFIG] config.py 수정 — llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2")...
+[2026-06-30 14:16] [IMPROVEMENT] kamis.py 작성 — """
+[2026-06-30 14:16] [IMPROVEMENT] scorer.py 작성 — """
+[2026-06-30 14:17] [AGENT] state.py 수정 — class AgentState(TypedDict):
+[2026-06-30 14:17] [AGENT] nodes.py 수정 — from app.agent.state import AgentState, SingleMealState
+[2026-06-30 14:18] [AGENT] graph.py 수정 — from app.agent.nodes import (
+[2026-06-30 14:18] [AGENT] graph.py 수정 — def build_graph() -> StateGraph:
+[2026-06-30 14:19] [AGENT] graph.py 수정 — def _should_single_regenerate(state: SingleMealState) -> str...
+[2026-06-30 14:19] [API] agent.py 수정 — class GeneratePlanResponse(BaseModel):
+[2026-06-30 14:19] [API] agent.py 수정 — class RecommendMealResponse(BaseModel):
+[2026-06-30 14:19] [API] agent.py 수정 — initial_state: SingleMealState = {
+[2026-06-30 14:19] [API] agent.py 수정 — return RecommendMealResponse(
+[2026-06-30 14:19] [API] agent.py 수정 — initial_state: AgentState = {
+[2026-06-30 14:19] [API] agent.py 수정 — return GeneratePlanResponse(
+[2026-06-30 14:23] [IMPROVEMENT] research.md 수정 — ---
+
+---
+[2026-06-30 14:23] [SESSION] 세션 종료
+---

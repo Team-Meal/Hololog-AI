@@ -50,6 +50,7 @@ class GeneratePlanResponse(BaseModel):
     meal_plan: list[dict]
     validation_errors: list[dict]
     budget_info: dict
+    meal_metrics: dict = {}
     error: str | None
 
 
@@ -82,6 +83,8 @@ class RecommendMealResponse(BaseModel):
     budgetLimit: int | None
     menus: list[dict]
     reason: str
+    qa_pairs: list[dict] = []
+    meal_metrics: dict = {}
     error: str | None
 
 
@@ -110,6 +113,9 @@ async def recommend_meal(
         "retry_count": 0,
         "budget_info": {},
         "error": None,
+        "scored_ingredients": [],
+        "qa_pairs": [],
+        "meal_metrics": {},
     }
 
     final_state: SingleMealState = await single_meal_graph.ainvoke(initial_state)
@@ -131,6 +137,8 @@ async def recommend_meal(
         budgetLimit=body.budgetLimit,
         menus=result.get("menus", []),
         reason=result.get("reason", ""),
+        qa_pairs=final_state.get("qa_pairs", []),
+        meal_metrics=final_state.get("meal_metrics", {}),
         error=warn,
     )
 
@@ -158,6 +166,8 @@ async def generate_plan(
         "budget_info": {},
         "retry_count": 0,
         "error": None,
+        "scored_ingredients": [],
+        "meal_metrics": {},
     }
 
     try:
@@ -189,5 +199,6 @@ async def generate_plan(
         meal_plan=final_state["meal_plan"],
         validation_errors=final_state["validation_errors"],
         budget_info=final_state.get("budget_info", {}),
+        meal_metrics=final_state.get("meal_metrics", {}),
         error=warn,
     )
