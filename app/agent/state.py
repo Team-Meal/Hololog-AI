@@ -14,6 +14,8 @@ class AgentState(TypedDict):
     budget_info: dict               # GET /budgets 결과
     retry_count: int                # 재생성 횟수 (최대 3)
     error: str | None               # 치명적 오류 메시지
+    scored_ingredients: list[dict]  # 룰 스코어링 결과 (ScoredIngredient.__dict__)
+    meal_metrics: dict              # 4.2 지표 5개
 
 
 class SingleMealState(TypedDict):
@@ -32,3 +34,6 @@ class SingleMealState(TypedDict):
     retry_count: int
     budget_info: dict
     error: str | None
+    scored_ingredients: list[dict]  # 룰 스코어링 결과
+    qa_pairs: list[dict]            # 7.4 예상 Q&A 6개 [{question, answer}]
+    meal_metrics: dict              # 4.2 지표 5개
